@@ -5,12 +5,12 @@ mod surface;
 #[path = "earth_renderer/texture.rs"]
 mod texture;
 
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{
-    HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlShader,
-    WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
+    Element, HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram,
+    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
 use crate::{
@@ -35,7 +35,7 @@ pub(super) struct PlanetRenderer {
     _vertex_array: WebGlVertexArrayObject,
     surface_texture: WebGlTexture,
     uniforms: Uniforms,
-    clock: Cell<SimulationClock>,
+    clock: Rc<Cell<SimulationClock>>,
 }
 
 struct Uniforms {
@@ -120,6 +120,9 @@ impl PlanetRenderer {
         gl.disable(Gl::CULL_FACE);
 
         let seconds_since_j2000 = js_sys::Date::now() / 1_000.0 - UNIX_SECONDS_AT_J2000;
+        let clock = Rc::new(Cell::new(SimulationClock::new(seconds_since_j2000)));
+        attach_time_control(canvas, Rc::clone(&clock))?;
+
         Ok(Self {
             canvas: canvas.clone(),
             gl,
@@ -128,19 +131,8 @@ impl PlanetRenderer {
             _vertex_array: vertex_array,
             surface_texture,
             uniforms,
-            clock: Cell::new(SimulationClock::new(seconds_since_j2000)),
+            clock,
         })
-    }
-
-    pub(super) fn cycle_time_scale(&self) -> f64 {
-        let mut clock = self.clock.get();
-        let scale = clock.cycle_scale();
-        self.clock.set(clock);
-        scale
-    }
-
-    pub(super) fn time_scale(&self) -> f64 {
-        self.clock.get().scale()
     }
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
@@ -210,6 +202,50 @@ impl PlanetRenderer {
             .uniform1f(Some(&self.uniforms.time), animation_seconds as f32);
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
     }
+}
+
+fn attach_time_control(
+    canvas: &HtmlCanvasElement,
+    clock: Rc<Cell<SimulationClock>>,
+) -> Result<(), JsValue> {
+    let document = canvas
+        .owner_document()
+        .ok_or_else(|| JsValue::from_str("The gallery document is unavailable."))?;
+    let installation = canvas
+        .parent_element()
+        .ok_or_else(|| JsValue::from_str("The Earth installation is unavailable."))?;
+    let toolbar_actions = installation
+        .query_selector(".toolbar-actions")?
+        .ok_or_else(|| JsValue::from_str("The installation toolbar is unavailable."))?;
+    let button = document.create_element("button")?;
+    button.set_attribute("type", "button")?;
+    button.set_attribute("class", "time-scale-button")?;
+    update_time_button(&button, clock.get().scale())?;
+    toolbar_actions.append_child(&button)?;
+
+    let button_for_click = button.clone();
+    let on_click = Closure::<dyn FnMut()>::new(move || {
+        let mut state = clock.get();
+        let scale = state.cycle_scale();
+        clock.set(state);
+        let _ = update_time_button(&button_for_click, scale);
+    });
+    button.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
+    on_click.forget();
+    Ok(())
+}
+
+fn update_time_button(button: &Element, scale: f64) -> Result<(), JsValue> {
+    let value = if scale == 0.0 {
+        "paused".to_owned()
+    } else {
+        format!("{scale:.0}×")
+    };
+    button.set_text_content(Some(&format!("Time {value}")));
+    button.set_attribute(
+        "aria-label",
+        &format!("Simulation time {value}. Activate to change simulation speed."),
+    )
 }
 
 fn set_vec3(gl: &Gl, uniform: &WebGlUniformLocation, vector: Vec3d) {
