@@ -170,9 +170,8 @@ impl CelestialFrame {
         let days = seconds / SECONDS_PER_DAY;
         let sun = solar_position_m(days);
         let moon = lunar_position_m(days);
-        let earth_rotation_radians =
-            (seconds / EARTH_SIDEREAL_ROTATION_S * std::f64::consts::TAU)
-                .rem_euclid(std::f64::consts::TAU);
+        let earth_rotation_radians = (seconds / EARTH_SIDEREAL_ROTATION_S * std::f64::consts::TAU)
+            .rem_euclid(std::f64::consts::TAU);
 
         Self {
             seconds_since_j2000: seconds,
@@ -243,10 +242,9 @@ impl EarthEllipsoid {
         }
         let equatorial_component = direction.x * direction.x + direction.z * direction.z;
         let polar_component = direction.y * direction.y;
-        1.0
-            / (equatorial_component / self.equatorial_radius_m.powi(2)
-                + polar_component / self.polar_radius_m.powi(2))
-            .sqrt()
+        1.0 / (equatorial_component / self.equatorial_radius_m.powi(2)
+            + polar_component / self.polar_radius_m.powi(2))
+        .sqrt()
     }
 
     pub fn radial_altitude_m(self, position_m: Vec3d) -> f64 {
@@ -269,9 +267,8 @@ impl EarthEllipsoid {
         }
         let a2 = self.equatorial_radius_m.powi(2);
         let b2 = self.polar_radius_m.powi(2);
-        let quadratic_a =
-            (direction.x * direction.x + direction.z * direction.z) / a2
-                + direction.y * direction.y / b2;
+        let quadratic_a = (direction.x * direction.x + direction.z * direction.z) / a2
+            + direction.y * direction.y / b2;
         let quadratic_b = 2.0
             * ((origin_m.x * direction.x + origin_m.z * direction.z) / a2
                 + origin_m.y * direction.y / b2);
@@ -305,9 +302,8 @@ fn solar_position_m(days_since_j2000: f64) -> Vec3d {
     let ecliptic_longitude = mean_longitude
         + radians(1.915) * mean_anomaly.sin()
         + radians(0.020) * (2.0 * mean_anomaly).sin();
-    let distance_au = 1.000_14
-        - 0.016_71 * mean_anomaly.cos()
-        - 0.000_14 * (2.0 * mean_anomaly).cos();
+    let distance_au =
+        1.000_14 - 0.016_71 * mean_anomaly.cos() - 0.000_14 * (2.0 * mean_anomaly).cos();
     ecliptic_to_equatorial(ecliptic_longitude, 0.0).normalized()
         * (distance_au * ASTRONOMICAL_UNIT_M)
 }
@@ -331,10 +327,8 @@ fn ecliptic_to_equatorial(longitude: f64, latitude: f64) -> Vec3d {
     );
     Vec3d::new(
         ecliptic.x,
-        ecliptic.y * J2000_OBLIQUITY_RADIANS.cos()
-            - ecliptic.z * J2000_OBLIQUITY_RADIANS.sin(),
-        ecliptic.y * J2000_OBLIQUITY_RADIANS.sin()
-            + ecliptic.z * J2000_OBLIQUITY_RADIANS.cos(),
+        ecliptic.y * J2000_OBLIQUITY_RADIANS.cos() - ecliptic.z * J2000_OBLIQUITY_RADIANS.sin(),
+        ecliptic.y * J2000_OBLIQUITY_RADIANS.sin() + ecliptic.z * J2000_OBLIQUITY_RADIANS.cos(),
     )
 }
 
