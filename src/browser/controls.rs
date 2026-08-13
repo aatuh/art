@@ -2,10 +2,13 @@
 
 use super::{
     dom::{element, text_element, window},
-    rendering::SceneRenderer,
+    rendering::{NavigationMode, SceneRenderer},
     storage::save_settings,
 };
-use crate::fps::{FpsInput, FpsSettings, PlayerState, is_supported_key_code};
+use crate::{
+    fps::{FpsInput, FpsSettings, PlayerState, is_supported_key_code},
+    spaceflight::{SpaceflightInput, SpaceflightState},
+};
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 use wasm_bindgen::{JsCast, closure::Closure, prelude::JsValue};
 use web_sys::{Document, Element, Event, HtmlInputElement, KeyboardEvent, MouseEvent};
@@ -36,8 +39,8 @@ impl Action {
             Self::Backward => "Backward",
             Self::Left => "Strafe left",
             Self::Right => "Strafe right",
-            Self::Jump => "Jump",
-            Self::Crouch => "Crouch",
+            Self::Jump => "Jump / ascend",
+            Self::Crouch => "Crouch / descend",
         }
     }
 
@@ -66,6 +69,7 @@ impl Action {
 
 pub(super) struct Session {
     player: PlayerState,
+    spaceflight: SpaceflightState,
     settings: FpsSettings,
     pressed: BTreeSet<String>,
     listening: Option<Action>,
@@ -79,6 +83,7 @@ impl Session {
     pub(super) fn new(settings: FpsSettings) -> Self {
         Self {
             player: PlayerState::default(),
+            spaceflight: SpaceflightState::default(),
             settings,
             pressed: BTreeSet::new(),
             listening: None,
@@ -89,7 +94,7 @@ impl Session {
         }
     }
 
-    fn input(&self) -> FpsInput {
+    fn room_input(&self) -> FpsInput {
         FpsInput {
             forward: self.action_pressed(Action::Forward),
             backward: self.action_pressed(Action::Backward),
@@ -99,12 +104,35 @@ impl Session {
         }
     }
 
+    fn space_input(&self) -> SpaceflightInput {
+        SpaceflightInput {
+            forward: self.action_pressed(Action::Forward),
+            backward: self.action_pressed(Action::Backward),
+            left: self.action_pressed(Action::Left),
+            right: self.action_pressed(Action::Right),
+            ascend: self.action_pressed(Action::Jump),
+            descend: self.action_pressed(Action::Crouch),
+            fast: self.pressed.contains("ShiftLeft") || self.pressed.contains("ShiftRight"),
+            brake: self.pressed.contains("KeyX"),
+        }
+    }
+
     fn action_pressed(&self, action: Action) -> bool {
         let binding = action.binding(&self.settings);
         self.pressed.contains(binding)
             || (action == Action::Crouch
                 && matches!(binding, "ControlLeft" | "ControlRight")
                 && (self.pressed.contains("ControlLeft") || self.pressed.contains("ControlRight")))
+    }
+
+    fn is_action_code(&self, code: &str) -> bool {
+        Action::ALL
+            .iter()
+            .any(|action| action.binding(&self.settings) == code)
+            || (matches!(
+                self.settings.bindings.crouch.as_str(),
+                "ControlLeft" | "ControlRight"
+            ) && matches!(code, "ControlLeft" | "ControlRight"))
     }
 
     fn update_binding_buttons(&self) {
@@ -223,6 +251,15 @@ pub(super) fn attach_fps_controls(
     session: &Rc<RefCell<Session>>,
     renderer: Rc<SceneRenderer>,
 ) -> Result<(), JsValue> {
+    let navigation = renderer.navigation_mode();
+    installation.set_attribute(
+        "data-navigation",
+        match navigation {
+            NavigationMode::Room => "room",
+            NavigationMode::Space => "space",
+        },
+    )?;
+
     let session_for_lock = Rc::clone(session);
     let document_for_lock = document.clone();
     let installation_for_lock = installation.clone();
@@ -249,11 +286,21 @@ pub(super) fn attach_fps_controls(
             return;
         }
         let settings = session.settings.clone();
-        session.player.look(
-            event.movement_x() as f32,
-            event.movement_y() as f32,
-            &settings,
-        );
+        match navigation {
+            NavigationMode::Room => session.player.look(
+                event.movement_x() as f32,
+                event.movement_y() as f32,
+                &settings,
+            ),
+            NavigationMode::Space => {
+                let vertical_direction = if settings.invert_mouse_y { -1.0 } else { 1.0 };
+                session.spaceflight.look(
+                    event.movement_x() as f64,
+                    event.movement_y() as f64 * vertical_direction,
+                    settings.mouse_sensitivity.to_radians() as f64,
+                );
+            }
+        }
     });
     document
         .add_event_listener_with_callback("mousemove", on_mouse_move.as_ref().unchecked_ref())?;
@@ -279,19 +326,32 @@ pub(super) fn attach_fps_controls(
         if event_target_is_form_control(&event) {
             return;
         }
+
         let code = event.code();
-        let is_action = Action::ALL
-            .iter()
-            .any(|action| action.binding(&session.settings) == code)
-            || (matches!(
-                session.settings.bindings.crouch.as_str(),
-                "ControlLeft" | "ControlRight"
-            ) && matches!(code.as_str(), "ControlLeft" | "ControlRight"));
-        if !is_action {
+        let is_action = session.is_action_code(&code);
+        let is_space_command = navigation == NavigationMode::Space
+            && matches!(
+                code.as_str(),
+                "ShiftLeft" | "ShiftRight" | "KeyX" | "KeyF" | "KeyR" | "KeyZ" | "KeyC"
+            );
+        if !is_action && !is_space_command {
             return;
         }
-        if code == session.settings.bindings.jump && !event.repeat() {
+
+        if navigation == NavigationMode::Room
+            && code == session.settings.bindings.jump
+            && !event.repeat()
+        {
             session.player.request_jump();
+        }
+        if navigation == NavigationMode::Space && !event.repeat() {
+            match code.as_str() {
+                "KeyF" => session.spaceflight.focus_earth(),
+                "KeyR" => session.spaceflight.reset_orbital_view(),
+                "KeyZ" => session.spaceflight.adjust_cruise_speed(-1),
+                "KeyC" => session.spaceflight.adjust_cruise_speed(1),
+                _ => {}
+            }
         }
         session.pressed.insert(code);
         event.prevent_default();
@@ -317,13 +377,14 @@ pub(super) fn attach_fps_controls(
     window()?.add_event_listener_with_callback("blur", on_blur.as_ref().unchecked_ref())?;
     on_blur.forget();
 
-    start_render_loop(session, renderer, observer)
+    start_render_loop(session, renderer, observer, navigation)
 }
 
 fn start_render_loop(
     session: &Rc<RefCell<Session>>,
     renderer: Rc<SceneRenderer>,
     observer: &Element,
+    navigation: NavigationMode,
 ) -> Result<(), JsValue> {
     let animation: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
     let animation_for_frame = Rc::clone(&animation);
@@ -339,14 +400,23 @@ fn start_render_loop(
         let delta = session
             .last_frame_ms
             .replace(now)
-            .map(|last_frame| ((now - last_frame) / 1000.0) as f32)
+            .map(|last_frame| (now - last_frame) / 1000.0)
             .unwrap_or(0.0);
-        let input = session.input();
-        session.player.tick(delta, input);
-        renderer_for_frame.render(session.player, now);
+
+        match navigation {
+            NavigationMode::Room => {
+                let input = session.room_input();
+                session.player.tick(delta as f32, input);
+            }
+            NavigationMode::Space => {
+                let input = session.space_input();
+                session.spaceflight.tick(delta, input);
+            }
+        }
+        renderer_for_frame.render(session.player, session.spaceflight, now);
         let _ = observer_for_frame.set_attribute(
             "data-crouching",
-            if session.player.crouching {
+            if navigation == NavigationMode::Room && session.player.crouching {
                 "true"
             } else {
                 "false"
