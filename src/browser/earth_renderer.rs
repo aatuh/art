@@ -1,1 +1,4 @@
-include!("planet_renderer.rs");
+#[path = "planet_renderer.rs"]
+mod implementation;
+
+pub(super) use implementation::PlanetRenderer;
