@@ -3,6 +3,8 @@
 pub mod artwork;
 pub mod artworks;
 pub mod fps;
+pub mod planet;
+pub mod spaceflight;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
 
