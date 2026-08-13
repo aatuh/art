@@ -15,11 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install pinned Rust toolchain
-        run: |
-          rustup toolchain install 1.85.0 --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown
-          rustup default 1.85.0
+      - name: Install project Rust toolchain
+        run: rustup toolchain install 1.85.0 --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown
       - name: Install pinned wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo +stable install wasm-pack --version 0.15.0 --locked
       - name: Run repository quality gate
-        run: make check
+        run: |
+          rustup default 1.85.0
+          make check
