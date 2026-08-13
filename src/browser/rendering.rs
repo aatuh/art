@@ -3,7 +3,7 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
-use crate::{ArtworkKind, fps::PlayerState, spaceflight::SpaceflightState};
+use crate::{ArtworkKind, exhibition_camera::SpaceflightState, fps::PlayerState};
 
 use super::{Renderer, earth_renderer::PlanetRenderer};
 
@@ -26,10 +26,10 @@ impl SceneRenderer {
         }
     }
 
-    pub(super) fn render(&self, room_player: PlayerState, spaceflight: SpaceflightState, now: f64) {
+    pub(super) fn render(&self, room_player: PlayerState, camera: SpaceflightState, now: f64) {
         match self {
             Self::Room(renderer) => renderer.render(room_player),
-            Self::Planet(renderer) => renderer.render(spaceflight, now),
+            Self::Planet(renderer) => renderer.render(camera, now),
         }
     }
 }
