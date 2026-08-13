@@ -49,8 +49,10 @@ impl SpaceflightState {
         }
         self.yaw_radians =
             (self.yaw_radians + delta_x * radians_per_unit).rem_euclid(std::f64::consts::TAU);
-        self.pitch_radians = (self.pitch_radians + delta_y * radians_per_unit)
-            .clamp(-std::f64::consts::FRAC_PI_2 + 0.001, std::f64::consts::FRAC_PI_2 - 0.001);
+        self.pitch_radians = (self.pitch_radians + delta_y * radians_per_unit).clamp(
+            -std::f64::consts::FRAC_PI_2 + 0.001,
+            std::f64::consts::FRAC_PI_2 - 0.001,
+        );
     }
 
     pub fn camera_basis(self) -> CameraBasis {
@@ -68,8 +70,8 @@ impl SpaceflightState {
 
     pub fn adjust_cruise_speed(&mut self, notches: i32) {
         let multiplier = SPEED_NOTCH_RATIO.powi(notches.clamp(-64, 64));
-        self.cruise_speed_mps = (self.cruise_speed_mps * multiplier)
-            .clamp(MIN_CRUISE_SPEED_MPS, MAX_CRUISE_SPEED_MPS);
+        self.cruise_speed_mps =
+            (self.cruise_speed_mps * multiplier).clamp(MIN_CRUISE_SPEED_MPS, MAX_CRUISE_SPEED_MPS);
     }
 
     pub fn focus(&mut self, target_m: Vec3d) {
@@ -77,9 +79,14 @@ impl SpaceflightState {
         if direction == Vec3d::ZERO {
             return;
         }
-        self.yaw_radians = direction.x.atan2(-direction.z).rem_euclid(std::f64::consts::TAU);
-        self.pitch_radians = (-direction.y.asin())
-            .clamp(-std::f64::consts::FRAC_PI_2 + 0.001, std::f64::consts::FRAC_PI_2 - 0.001);
+        self.yaw_radians = direction
+            .x
+            .atan2(-direction.z)
+            .rem_euclid(std::f64::consts::TAU);
+        self.pitch_radians = (-direction.y.asin()).clamp(
+            -std::f64::consts::FRAC_PI_2 + 0.001,
+            std::f64::consts::FRAC_PI_2 - 0.001,
+        );
     }
 
     pub fn focus_earth(&mut self) {
@@ -150,7 +157,13 @@ mod tests {
     #[test]
     fn default_orbital_view_faces_earth() {
         let state = SpaceflightState::default();
-        assert!(state.camera_basis().forward.dot((-state.position_m).normalized()) > 0.999_999);
+        assert!(
+            state
+                .camera_basis()
+                .forward
+                .dot((-state.position_m).normalized())
+                > 0.999_999
+        );
         assert!(state.radial_altitude_above_earth_m() > EARTH_EQUATORIAL_RADIUS_M * 2.9);
     }
 
@@ -188,6 +201,12 @@ mod tests {
         let mut state = SpaceflightState::default();
         let target = Vec3d::new(10_000_000.0, 7_000_000.0, -3_000_000.0);
         state.focus(target);
-        assert!(state.camera_basis().forward.dot((target - state.position_m).normalized()) > 0.999_999);
+        assert!(
+            state
+                .camera_basis()
+                .forward
+                .dot((target - state.position_m).normalized())
+                > 0.999_999
+        );
     }
 }
