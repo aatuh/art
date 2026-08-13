@@ -32,6 +32,19 @@ impl SceneRenderer {
             Self::Planet(renderer) => renderer.render(camera, now),
         }
     }
+
+    pub(super) fn cycle_time_scale(&self) {
+        if let Self::Planet(renderer) = self {
+            renderer.cycle_time_scale();
+        }
+    }
+
+    pub(super) fn time_scale(&self) -> Option<f64> {
+        match self {
+            Self::Room(_) => None,
+            Self::Planet(renderer) => Some(renderer.time_scale()),
+        }
+    }
 }
 
 /// The exhaustive domain enum forces a renderer decision for every published artwork.
