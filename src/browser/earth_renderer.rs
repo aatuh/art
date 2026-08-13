@@ -1,23 +1,28 @@
 //! Camera-relative, physically scaled WebGL 2 renderer for A World in Light.
 
+#[path = "earth_surface.rs"]
+mod surface;
+#[path = "earth_renderer/texture.rs"]
+mod texture;
+
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
     HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlShader,
-    WebGlUniformLocation, WebGlVertexArrayObject,
+    WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
 use crate::{
     camera_api::CameraState,
     planet::{
         CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M, EARTH_POLAR_RADIUS_M,
-        MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M,
+        MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M, Vec3d,
     },
 };
 
 use super::dom::window;
 
 const UNIX_SECONDS_AT_J2000: f64 = 946_728_000.0;
-const MAX_DEVICE_PIXEL_RATIO: f64 = 1.5;
+const MAX_DEVICE_PIXEL_RATIO: f64 = 2.0;
 
 pub(super) struct PlanetRenderer {
     canvas: HtmlCanvasElement,
@@ -25,6 +30,7 @@ pub(super) struct PlanetRenderer {
     program: WebGlProgram,
     _buffer: WebGlBuffer,
     _vertex_array: WebGlVertexArrayObject,
+    surface_texture: WebGlTexture,
     uniforms: Uniforms,
 }
 
@@ -33,15 +39,18 @@ struct Uniforms {
     camera_forward: WebGlUniformLocation,
     camera_right: WebGlUniformLocation,
     camera_up: WebGlUniformLocation,
-    earth_center: WebGlUniformLocation,
-    moon_center: WebGlUniformLocation,
-    sun_center: WebGlUniformLocation,
-    earth_polar_radius: WebGlUniformLocation,
-    atmosphere_radius: WebGlUniformLocation,
-    moon_radius: WebGlUniformLocation,
-    sun_radius: WebGlUniformLocation,
+    earth_center_m: WebGlUniformLocation,
+    moon_center_m: WebGlUniformLocation,
+    sun_center_m: WebGlUniformLocation,
+    earth_equatorial_radius_m: WebGlUniformLocation,
+    earth_polar_radius_m: WebGlUniformLocation,
+    atmosphere_top_m: WebGlUniformLocation,
+    moon_radius_m: WebGlUniformLocation,
+    sun_radius_m: WebGlUniformLocation,
     earth_rotation: WebGlUniformLocation,
+    camera_altitude_m: WebGlUniformLocation,
     time: WebGlUniformLocation,
+    surface: WebGlUniformLocation,
 }
 
 impl PlanetRenderer {
@@ -77,21 +86,30 @@ impl PlanetRenderer {
         gl.enable_vertex_attrib_array(position as u32);
         gl.vertex_attrib_pointer_with_i32(position as u32, 2, Gl::FLOAT, false, 0, 0);
 
+        let surface_texture = texture::create(&gl)?;
         let uniforms = Uniforms {
             resolution: required_uniform(&gl, &program, "u_resolution")?,
             camera_forward: required_uniform(&gl, &program, "u_camera_forward")?,
             camera_right: required_uniform(&gl, &program, "u_camera_right")?,
             camera_up: required_uniform(&gl, &program, "u_camera_up")?,
-            earth_center: required_uniform(&gl, &program, "u_earth_center")?,
-            moon_center: required_uniform(&gl, &program, "u_moon_center")?,
-            sun_center: required_uniform(&gl, &program, "u_sun_center")?,
-            earth_polar_radius: required_uniform(&gl, &program, "u_earth_polar_radius")?,
-            atmosphere_radius: required_uniform(&gl, &program, "u_atmosphere_radius")?,
-            moon_radius: required_uniform(&gl, &program, "u_moon_radius")?,
-            sun_radius: required_uniform(&gl, &program, "u_sun_radius")?,
+            earth_center_m: required_uniform(&gl, &program, "u_earth_center_m")?,
+            moon_center_m: required_uniform(&gl, &program, "u_moon_center_m")?,
+            sun_center_m: required_uniform(&gl, &program, "u_sun_center_m")?,
+            earth_equatorial_radius_m: required_uniform(
+                &gl,
+                &program,
+                "u_earth_equatorial_radius_m",
+            )?,
+            earth_polar_radius_m: required_uniform(&gl, &program, "u_earth_polar_radius_m")?,
+            atmosphere_top_m: required_uniform(&gl, &program, "u_atmosphere_top_m")?,
+            moon_radius_m: required_uniform(&gl, &program, "u_moon_radius_m")?,
+            sun_radius_m: required_uniform(&gl, &program, "u_sun_radius_m")?,
             earth_rotation: required_uniform(&gl, &program, "u_earth_rotation")?,
+            camera_altitude_m: required_uniform(&gl, &program, "u_camera_altitude_m")?,
             time: required_uniform(&gl, &program, "u_time")?,
+            surface: required_uniform(&gl, &program, "u_surface")?,
         };
+        gl.uniform1i(Some(&uniforms.surface), 0);
 
         gl.disable(Gl::DEPTH_TEST);
         gl.disable(Gl::BLEND);
@@ -103,6 +121,7 @@ impl PlanetRenderer {
             program,
             _buffer: buffer,
             _vertex_array: vertex_array,
+            surface_texture,
             uniforms,
         })
     }
@@ -113,49 +132,58 @@ impl PlanetRenderer {
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
         self.gl.clear(Gl::COLOR_BUFFER_BIT);
         self.gl.use_program(Some(&self.program));
+        self.gl.active_texture(Gl::TEXTURE0);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
 
         let seconds_since_j2000 = js_sys::Date::now() / 1_000.0 - UNIX_SECONDS_AT_J2000;
         let celestial = CelestialFrame::at_seconds_since_j2000(seconds_since_j2000);
         let relative = celestial.relative_to(visitor.position_m);
         let basis = visitor.camera_basis();
-        let earth = relative.earth_center_m.to_earth_radii_f32();
-        let moon = relative.moon_center_m.to_earth_radii_f32();
-        let sun = relative.sun_center_m.to_earth_radii_f32();
 
         self.gl
             .uniform2f(Some(&self.uniforms.resolution), width as f32, height as f32);
         set_vec3(&self.gl, &self.uniforms.camera_forward, basis.forward);
         set_vec3(&self.gl, &self.uniforms.camera_right, basis.right);
         set_vec3(&self.gl, &self.uniforms.camera_up, basis.up);
-        self.gl.uniform3f(
-            Some(&self.uniforms.earth_center),
-            earth[0],
-            earth[1],
-            earth[2],
+        set_vec3(
+            &self.gl,
+            &self.uniforms.earth_center_m,
+            relative.earth_center_m,
         );
-        self.gl
-            .uniform3f(Some(&self.uniforms.moon_center), moon[0], moon[1], moon[2]);
-        self.gl
-            .uniform3f(Some(&self.uniforms.sun_center), sun[0], sun[1], sun[2]);
-        self.gl.uniform1f(
-            Some(&self.uniforms.earth_polar_radius),
-            (EARTH_POLAR_RADIUS_M / EARTH_EQUATORIAL_RADIUS_M) as f32,
+        set_vec3(
+            &self.gl,
+            &self.uniforms.moon_center_m,
+            relative.moon_center_m,
         );
+        set_vec3(&self.gl, &self.uniforms.sun_center_m, relative.sun_center_m);
         self.gl.uniform1f(
-            Some(&self.uniforms.atmosphere_radius),
-            (1.0 + EARTH_ATMOSPHERE_TOP_M / EARTH_EQUATORIAL_RADIUS_M) as f32,
+            Some(&self.uniforms.earth_equatorial_radius_m),
+            EARTH_EQUATORIAL_RADIUS_M as f32,
         );
         self.gl.uniform1f(
-            Some(&self.uniforms.moon_radius),
-            (MOON_MEAN_RADIUS_M / EARTH_EQUATORIAL_RADIUS_M) as f32,
+            Some(&self.uniforms.earth_polar_radius_m),
+            EARTH_POLAR_RADIUS_M as f32,
         );
         self.gl.uniform1f(
-            Some(&self.uniforms.sun_radius),
-            (SUN_NOMINAL_RADIUS_M / EARTH_EQUATORIAL_RADIUS_M) as f32,
+            Some(&self.uniforms.atmosphere_top_m),
+            EARTH_ATMOSPHERE_TOP_M as f32,
+        );
+        self.gl.uniform1f(
+            Some(&self.uniforms.moon_radius_m),
+            MOON_MEAN_RADIUS_M as f32,
+        );
+        self.gl.uniform1f(
+            Some(&self.uniforms.sun_radius_m),
+            SUN_NOMINAL_RADIUS_M as f32,
         );
         self.gl.uniform1f(
             Some(&self.uniforms.earth_rotation),
             celestial.earth_rotation_radians as f32,
+        );
+        self.gl.uniform1f(
+            Some(&self.uniforms.camera_altitude_m),
+            visitor.radial_altitude_above_earth_m().max(0.0) as f32,
         );
         self.gl
             .uniform1f(Some(&self.uniforms.time), (now / 1_000.0) as f32);
@@ -163,7 +191,7 @@ impl PlanetRenderer {
     }
 }
 
-fn set_vec3(gl: &Gl, uniform: &WebGlUniformLocation, vector: crate::planet::Vec3d) {
+fn set_vec3(gl: &Gl, uniform: &WebGlUniformLocation, vector: Vec3d) {
     gl.uniform3f(
         Some(uniform),
         vector.x as f32,
@@ -254,4 +282,4 @@ fn link_program(
 }
 
 const VERTEX_SHADER: &str = include_str!("shaders/planet.vert.glsl");
-const FRAGMENT_SHADER: &str = include_str!("shaders/planet.frag.glsl");
+const FRAGMENT_SHADER: &str = include_str!("shaders/planet_v4.frag.glsl");
