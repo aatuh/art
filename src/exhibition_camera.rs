@@ -6,8 +6,13 @@
 use crate::planet::{ASTRONOMICAL_UNIT_M, EARTH_EQUATORIAL_RADIUS_M, EarthEllipsoid, Vec3d};
 
 pub const MIN_CAMERA_SPEED_MPS: f64 = 0.25;
-pub const MAX_CAMERA_SPEED_MPS: f64 = 50_000_000.0;
-pub const DEFAULT_CAMERA_SPEED_MPS: f64 = 25_000.0;
+pub const MAX_CAMERA_SPEED_MPS: f64 = ASTRONOMICAL_UNIT_M / 10.0;
+pub const DEFAULT_CAMERA_SPEED_MPS: f64 = EARTH_EQUATORIAL_RADIUS_M * 3.0 * 0.04;
+pub const MIN_SPEED_MULTIPLIER: f64 = 0.01;
+pub const MAX_SPEED_MULTIPLIER: f64 = 100.0;
+pub const DEFAULT_SPEED_MULTIPLIER: f64 = 1.0;
+const CLEARANCE_SPEED_RATIO: f64 = 0.04;
+const FAST_TRAVEL_MULTIPLIER: f64 = 12.0;
 const SPEED_STEP_RATIO: f64 = 1.778_279_410_038_922_8;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const MAX_CAMERA_DISTANCE_M: f64 = ASTRONOMICAL_UNIT_M * 100.0;
@@ -31,6 +36,7 @@ pub struct SpaceflightState {
     pub yaw_radians: f64,
     pub pitch_radians: f64,
     pub camera_speed_mps: f64,
+    pub speed_multiplier: f64,
 }
 
 impl Default for SpaceflightState {
@@ -41,6 +47,7 @@ impl Default for SpaceflightState {
             yaw_radians: 0.0,
             pitch_radians: 0.0,
             camera_speed_mps: DEFAULT_CAMERA_SPEED_MPS,
+            speed_multiplier: DEFAULT_SPEED_MULTIPLIER,
         }
     }
 }
@@ -73,8 +80,29 @@ impl SpaceflightState {
 
     pub fn adjust_camera_speed(&mut self, steps: i32) {
         let multiplier = SPEED_STEP_RATIO.powi(steps.clamp(-64, 64));
-        self.camera_speed_mps =
-            (self.camera_speed_mps * multiplier).clamp(MIN_CAMERA_SPEED_MPS, MAX_CAMERA_SPEED_MPS);
+        self.speed_multiplier = (self.speed_multiplier * multiplier)
+            .clamp(MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
+    }
+
+    pub fn effective_camera_speed_mps(
+        self,
+        nearest_surface_distance_m: f64,
+        accelerated: bool,
+    ) -> f64 {
+        let clearance = if nearest_surface_distance_m.is_finite() {
+            nearest_surface_distance_m.max(0.0)
+        } else {
+            0.0
+        };
+        let base_speed = (clearance * CLEARANCE_SPEED_RATIO)
+            .clamp(MIN_CAMERA_SPEED_MPS, MAX_CAMERA_SPEED_MPS);
+        let acceleration = if accelerated {
+            FAST_TRAVEL_MULTIPLIER
+        } else {
+            1.0
+        };
+        (base_speed * self.speed_multiplier * acceleration)
+            .clamp(MIN_CAMERA_SPEED_MPS, MAX_CAMERA_SPEED_MPS)
     }
 
     pub fn point_at(&mut self, point_m: Vec3d) {
@@ -104,7 +132,19 @@ impl SpaceflightState {
         EarthEllipsoid::default().radial_altitude_m(self.position_m)
     }
 
+    /// Advances the virtual camera using Earth clearance as a compatibility fallback.
     pub fn tick(&mut self, frame_seconds: f64, input: SpaceflightInput) {
+        let earth_clearance = self.radial_altitude_above_earth_m().max(0.0);
+        self.tick_with_clearance(frame_seconds, input, earth_clearance);
+    }
+
+    /// Advances the virtual camera at a speed proportional to the nearest celestial surface.
+    pub fn tick_with_clearance(
+        &mut self,
+        frame_seconds: f64,
+        input: SpaceflightInput,
+        nearest_surface_distance_m: f64,
+    ) {
         let dt = frame_seconds.clamp(0.0, MAX_FRAME_SECONDS);
         if dt <= 0.0 {
             return;
@@ -118,11 +158,12 @@ impl SpaceflightState {
         } else {
             requested
         };
-        let speed = self.camera_speed_mps * if input.accelerated { 24.0 } else { 1.0 };
+        self.camera_speed_mps =
+            self.effective_camera_speed_mps(nearest_surface_distance_m, input.accelerated);
         let desired_velocity = if input.stop {
             Vec3d::ZERO
         } else {
-            requested * speed
+            requested * self.camera_speed_mps
         };
         let response_seconds: f64 = if input.stop { 0.045 } else { 0.14 };
         let blend = 1.0 - (-dt / response_seconds).exp();
@@ -158,7 +199,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_view_faces_earth() {
+    fn default_view_faces_earth_and_has_visible_orbital_speed() {
         let camera = SpaceflightState::default();
         assert!(
             camera
@@ -167,6 +208,7 @@ mod tests {
                 .dot((-camera.position_m).normalized())
                 > 0.999_999
         );
+        assert!(camera.camera_speed_mps > 700_000.0);
     }
 
     #[test]
@@ -190,12 +232,32 @@ mod tests {
     }
 
     #[test]
-    fn speed_steps_cover_close_and_distant_views() {
+    fn adaptive_speed_remains_precise_near_a_surface_and_visible_in_orbit() {
+        let camera = SpaceflightState::default();
+        let walking_scale = camera.effective_camera_speed_mps(10.0, false);
+        let low_orbit = camera.effective_camera_speed_mps(400_000.0, false);
+        let initial_view = camera.effective_camera_speed_mps(
+            EARTH_EQUATORIAL_RADIUS_M * 3.0,
+            false,
+        );
+        let fast_travel = camera.effective_camera_speed_mps(
+            EARTH_EQUATORIAL_RADIUS_M * 3.0,
+            true,
+        );
+
+        assert!((walking_scale - 0.4).abs() < 1.0e-12);
+        assert!((low_orbit - 16_000.0).abs() < 1.0e-9);
+        assert!(initial_view > 700_000.0);
+        assert!(fast_travel > initial_view * 11.9);
+    }
+
+    #[test]
+    fn speed_steps_cover_slow_inspection_and_fast_travel() {
         let mut camera = SpaceflightState::default();
         camera.adjust_camera_speed(-64);
-        assert_eq!(camera.camera_speed_mps, MIN_CAMERA_SPEED_MPS);
+        assert_eq!(camera.speed_multiplier, MIN_SPEED_MULTIPLIER);
         camera.adjust_camera_speed(64);
-        assert_eq!(camera.camera_speed_mps, MAX_CAMERA_SPEED_MPS);
+        assert_eq!(camera.speed_multiplier, MAX_SPEED_MULTIPLIER);
     }
 
     #[test]
