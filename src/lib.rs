@@ -2,12 +2,11 @@
 
 pub mod artwork;
 pub mod artworks;
+pub mod exhibition_camera;
 pub mod fps;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
 pub mod planet;
-#[path = "exhibition_camera.rs"]
-pub mod spaceflight;
 
 pub use artwork::{Artwork, ArtworkKind, Destination, is_valid_artwork_id};
 pub use artworks::{ARTWORKS, BLACK_CUBE_ROOM, MVP_GALLERY_WORLD, ORBITING_EARTH};
