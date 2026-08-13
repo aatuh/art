@@ -32,10 +32,13 @@ web-sys = { version = "=0.3.84", features = [
   "Node",
   "Performance",
   "Storage",
+  "WebGl2RenderingContext",
   "WebGlBuffer",
   "WebGlProgram",
   "WebGlRenderingContext",
   "WebGlShader",
+  "WebGlTexture",
   "WebGlUniformLocation",
+  "WebGlVertexArrayObject",
   "Window"
 ] }
