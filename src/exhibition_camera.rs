@@ -80,8 +80,8 @@ impl SpaceflightState {
 
     pub fn adjust_camera_speed(&mut self, steps: i32) {
         let multiplier = SPEED_STEP_RATIO.powi(steps.clamp(-64, 64));
-        self.speed_multiplier = (self.speed_multiplier * multiplier)
-            .clamp(MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
+        self.speed_multiplier =
+            (self.speed_multiplier * multiplier).clamp(MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
     }
 
     pub fn effective_camera_speed_mps(
@@ -94,8 +94,8 @@ impl SpaceflightState {
         } else {
             0.0
         };
-        let base_speed = (clearance * CLEARANCE_SPEED_RATIO)
-            .clamp(MIN_CAMERA_SPEED_MPS, MAX_CAMERA_SPEED_MPS);
+        let base_speed =
+            (clearance * CLEARANCE_SPEED_RATIO).clamp(MIN_CAMERA_SPEED_MPS, MAX_CAMERA_SPEED_MPS);
         let acceleration = if accelerated {
             FAST_TRAVEL_MULTIPLIER
         } else {
@@ -236,14 +236,9 @@ mod tests {
         let camera = SpaceflightState::default();
         let walking_scale = camera.effective_camera_speed_mps(10.0, false);
         let low_orbit = camera.effective_camera_speed_mps(400_000.0, false);
-        let initial_view = camera.effective_camera_speed_mps(
-            EARTH_EQUATORIAL_RADIUS_M * 3.0,
-            false,
-        );
-        let fast_travel = camera.effective_camera_speed_mps(
-            EARTH_EQUATORIAL_RADIUS_M * 3.0,
-            true,
-        );
+        let initial_view =
+            camera.effective_camera_speed_mps(EARTH_EQUATORIAL_RADIUS_M * 3.0, false);
+        let fast_travel = camera.effective_camera_speed_mps(EARTH_EQUATORIAL_RADIUS_M * 3.0, true);
 
         assert!((walking_scale - 0.4).abs() < 1.0e-12);
         assert!((low_orbit - 16_000.0).abs() < 1.0e-9);
