@@ -5,6 +5,8 @@ mod surface;
 #[path = "earth_renderer/texture.rs"]
 mod texture;
 
+use std::cell::Cell;
+
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
     HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram, WebGlShader,
@@ -17,6 +19,7 @@ use crate::{
         CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M, EARTH_POLAR_RADIUS_M,
         MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M, Vec3d,
     },
+    simulation_clock::SimulationClock,
 };
 
 use super::dom::window;
@@ -32,6 +35,7 @@ pub(super) struct PlanetRenderer {
     _vertex_array: WebGlVertexArrayObject,
     surface_texture: WebGlTexture,
     uniforms: Uniforms,
+    clock: Cell<SimulationClock>,
 }
 
 struct Uniforms {
@@ -115,6 +119,7 @@ impl PlanetRenderer {
         gl.disable(Gl::BLEND);
         gl.disable(Gl::CULL_FACE);
 
+        let seconds_since_j2000 = js_sys::Date::now() / 1_000.0 - UNIX_SECONDS_AT_J2000;
         Ok(Self {
             canvas: canvas.clone(),
             gl,
@@ -123,7 +128,19 @@ impl PlanetRenderer {
             _vertex_array: vertex_array,
             surface_texture,
             uniforms,
+            clock: Cell::new(SimulationClock::new(seconds_since_j2000)),
         })
+    }
+
+    pub(super) fn cycle_time_scale(&self) -> f64 {
+        let mut clock = self.clock.get();
+        let scale = clock.cycle_scale();
+        self.clock.set(clock);
+        scale
+    }
+
+    pub(super) fn time_scale(&self) -> f64 {
+        self.clock.get().scale()
     }
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
@@ -136,7 +153,11 @@ impl PlanetRenderer {
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
 
-        let seconds_since_j2000 = js_sys::Date::now() / 1_000.0 - UNIX_SECONDS_AT_J2000;
+        let mut clock = self.clock.get();
+        let seconds_since_j2000 = clock.advance(now);
+        let animation_seconds = clock.animation_seconds();
+        self.clock.set(clock);
+
         let celestial = CelestialFrame::at_seconds_since_j2000(seconds_since_j2000);
         let relative = celestial.relative_to(visitor.position_m);
         let basis = visitor.camera_basis();
@@ -186,7 +207,7 @@ impl PlanetRenderer {
             visitor.radial_altitude_above_earth_m().max(0.0) as f32,
         );
         self.gl
-            .uniform1f(Some(&self.uniforms.time), (now / 1_000.0) as f32);
+            .uniform1f(Some(&self.uniforms.time), animation_seconds as f32);
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
     }
 }
