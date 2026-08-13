@@ -8,8 +8,8 @@ use web_sys::{
 
 use crate::{
     planet::{
-        CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M,
-        EARTH_POLAR_RADIUS_M, MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M,
+        CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M, EARTH_POLAR_RADIUS_M,
+        MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M,
     },
     spaceflight::SpaceflightState,
 };
@@ -122,11 +122,8 @@ impl PlanetRenderer {
         let moon = relative.moon_center_m.to_earth_radii_f32();
         let sun = relative.sun_center_m.to_earth_radii_f32();
 
-        self.gl.uniform2f(
-            Some(&self.uniforms.resolution),
-            width as f32,
-            height as f32,
-        );
+        self.gl
+            .uniform2f(Some(&self.uniforms.resolution), width as f32, height as f32);
         set_vec3(&self.gl, &self.uniforms.camera_forward, basis.forward);
         set_vec3(&self.gl, &self.uniforms.camera_right, basis.right);
         set_vec3(&self.gl, &self.uniforms.camera_up, basis.up);
@@ -136,18 +133,10 @@ impl PlanetRenderer {
             earth[1],
             earth[2],
         );
-        self.gl.uniform3f(
-            Some(&self.uniforms.moon_center),
-            moon[0],
-            moon[1],
-            moon[2],
-        );
-        self.gl.uniform3f(
-            Some(&self.uniforms.sun_center),
-            sun[0],
-            sun[1],
-            sun[2],
-        );
+        self.gl
+            .uniform3f(Some(&self.uniforms.moon_center), moon[0], moon[1], moon[2]);
+        self.gl
+            .uniform3f(Some(&self.uniforms.sun_center), sun[0], sun[1], sun[2]);
         self.gl.uniform1f(
             Some(&self.uniforms.earth_polar_radius),
             (EARTH_POLAR_RADIUS_M / EARTH_EQUATORIAL_RADIUS_M) as f32,
@@ -187,7 +176,11 @@ fn resize_canvas(canvas: &HtmlCanvasElement) -> (u32, u32) {
     let width = canvas.client_width().max(1) as u32;
     let height = canvas.client_height().max(1) as u32;
     let scale = window()
-        .map(|window| window.device_pixel_ratio().clamp(1.0, MAX_DEVICE_PIXEL_RATIO))
+        .map(|window| {
+            window
+                .device_pixel_ratio()
+                .clamp(1.0, MAX_DEVICE_PIXEL_RATIO)
+        })
         .unwrap_or(1.0);
     let pixel_width = (width as f64 * scale).round() as u32;
     let pixel_height = (height as f64 * scale).round() as u32;
