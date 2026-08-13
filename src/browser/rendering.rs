@@ -3,9 +3,15 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
-use crate::{ArtworkKind, fps::PlayerState};
+use crate::{ArtworkKind, fps::PlayerState, spaceflight::SpaceflightState};
 
 use super::{Renderer, earth_renderer::PlanetRenderer};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum NavigationMode {
+    Room,
+    Space,
+}
 
 pub(super) enum SceneRenderer {
     Room(Renderer),
@@ -13,10 +19,22 @@ pub(super) enum SceneRenderer {
 }
 
 impl SceneRenderer {
-    pub(super) fn render(&self, player: PlayerState, now: f64) {
+    pub(super) fn navigation_mode(&self) -> NavigationMode {
         match self {
-            Self::Room(renderer) => renderer.render(player),
-            Self::Planet(renderer) => renderer.render(player, now),
+            Self::Room(_) => NavigationMode::Room,
+            Self::Planet(_) => NavigationMode::Space,
+        }
+    }
+
+    pub(super) fn render(
+        &self,
+        room_player: PlayerState,
+        spaceflight: SpaceflightState,
+        now: f64,
+    ) {
+        match self {
+            Self::Room(renderer) => renderer.render(room_player),
+            Self::Planet(renderer) => renderer.render(spaceflight, now),
         }
     }
 }
