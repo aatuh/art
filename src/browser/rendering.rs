@@ -26,20 +26,6 @@ impl SceneRenderer {
         }
     }
 
-    pub(super) fn simulation_time_scale(&self) -> Option<f64> {
-        match self {
-            Self::Room(_) => None,
-            Self::Planet(renderer) => Some(renderer.time_scale()),
-        }
-    }
-
-    pub(super) fn cycle_simulation_time_scale(&self) -> Option<f64> {
-        match self {
-            Self::Room(_) => None,
-            Self::Planet(renderer) => Some(renderer.cycle_time_scale()),
-        }
-    }
-
     pub(super) fn render(&self, room_player: PlayerState, camera: SpaceflightState, now: f64) {
         match self {
             Self::Room(renderer) => renderer.render(room_player),
