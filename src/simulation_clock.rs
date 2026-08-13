@@ -6,6 +6,7 @@ pub const TIME_SCALES: [f64; 4] = [REAL_TIME_SCALE, 60.0, 3600.0, 0.0];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SimulationClock {
     seconds_since_epoch: f64,
+    animation_seconds: f64,
     last_frame_ms: Option<f64>,
     scale_index: usize,
 }
@@ -14,6 +15,7 @@ impl SimulationClock {
     pub fn new(seconds_since_epoch: f64) -> Self {
         Self {
             seconds_since_epoch: finite_or_zero(seconds_since_epoch),
+            animation_seconds: 0.0,
             last_frame_ms: None,
             scale_index: 0,
         }
@@ -21,6 +23,10 @@ impl SimulationClock {
 
     pub fn seconds_since_epoch(self) -> f64 {
         self.seconds_since_epoch
+    }
+
+    pub fn animation_seconds(self) -> f64 {
+        self.animation_seconds
     }
 
     pub fn scale(self) -> f64 {
@@ -41,13 +47,11 @@ impl SimulationClock {
         };
         let elapsed_seconds = ((frame_ms - previous_ms) / 1000.0).max(0.0);
         if elapsed_seconds.is_finite() {
-            self.seconds_since_epoch += elapsed_seconds * self.scale();
+            let simulated_seconds = elapsed_seconds * self.scale();
+            self.seconds_since_epoch += simulated_seconds;
+            self.animation_seconds += simulated_seconds;
         }
         self.seconds_since_epoch
-    }
-
-    pub fn animation_seconds(self) -> f64 {
-        self.seconds_since_epoch.rem_euclid(86_400.0)
     }
 }
 
@@ -65,6 +69,7 @@ mod tests {
         assert_eq!(clock.scale(), 1.0);
         assert_eq!(clock.advance(500.0), 1000.0);
         assert_eq!(clock.advance(1500.0), 1001.0);
+        assert_eq!(clock.animation_seconds(), 1.0);
     }
 
     #[test]
@@ -85,18 +90,29 @@ mod tests {
         clock.cycle_scale();
         assert_eq!(clock.scale(), 0.0);
         assert_eq!(clock.advance(10_000.0), 42.0);
+        assert_eq!(clock.animation_seconds(), 0.0);
     }
 
     #[test]
-    fn accelerated_clock_advances_by_selected_multiplier() {
+    fn accelerated_clock_advances_epoch_and_animation_together() {
         let mut clock = SimulationClock::new(5.0);
         clock.advance(1000.0);
         clock.cycle_scale();
         assert_eq!(clock.scale(), 60.0);
         assert_eq!(clock.advance(2000.0), 65.0);
+        assert_eq!(clock.animation_seconds(), 60.0);
         clock.cycle_scale();
         assert_eq!(clock.scale(), 3600.0);
         assert_eq!(clock.advance(3000.0), 3665.0);
+        assert_eq!(clock.animation_seconds(), 3660.0);
+    }
+
+    #[test]
+    fn animation_time_does_not_wrap_at_day_boundaries() {
+        let mut clock = SimulationClock::new(86_399.0);
+        clock.advance(0.0);
+        assert_eq!(clock.advance(2000.0), 86_401.0);
+        assert_eq!(clock.animation_seconds(), 2.0);
     }
 
     #[test]
@@ -106,5 +122,6 @@ mod tests {
         clock.advance(1000.0);
         assert_eq!(clock.advance(500.0), 0.0);
         assert_eq!(clock.advance(f64::NAN), 0.0);
+        assert_eq!(clock.animation_seconds(), 0.0);
     }
 }
