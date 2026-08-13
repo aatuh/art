@@ -1,0 +1,59 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: #171717;
+  color: #171717;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input { font: inherit; }
+button:focus-visible, input:focus-visible { outline: 3px solid #3f73ff; outline-offset: 3px; }
+.gallery-shell { min-height: 100vh; }
+
+.catalogue { display: grid; min-height: 100vh; place-items: center; padding: 2rem; background: #f6f5f1; }
+.catalogue-content { width: min(100%, 68rem); }
+.eyebrow { margin: 0 0 .75rem; color: #64615b; font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+h1, h2, p { margin-top: 0; }
+h1 { max-width: 16ch; margin-bottom: 2.5rem; font-size: clamp(2.5rem, 8vw, 6rem); line-height: .94; letter-spacing: -.07em; }
+.artwork-list { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.artwork-card { min-height: 18rem; padding: 1.5rem; border: 1px solid #bbb8b0; border-radius: .5rem; background: #fff; text-align: left; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }
+.artwork-card:hover { box-shadow: 0 .8rem 2rem rgb(0 0 0 / .13); transform: translateY(-.2rem); }
+.artwork-card h2 { margin-bottom: .6rem; font-size: 1.6rem; letter-spacing: -.04em; }
+.artwork-card p { color: #57534c; line-height: 1.5; }
+.artwork-card .enter-label { display: block; margin-top: 2rem; font-weight: 700; }
+
+.installation { position: relative; min-height: 100vh; overflow: hidden; background: #e8e8e4; }
+.fps-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.installation-toolbar { position: absolute; z-index: 4; top: 1rem; left: 1rem; right: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #111; pointer-events: auto; }
+.fps-installation[data-artwork="orbiting-earth"] .installation-toolbar { color: #f7f9ff; text-shadow: 0 1px 4px #000; }
+.toolbar-actions { display: flex; gap: .5rem; }
+.back-button, .enter-fps-button, .fullscreen-button, .settings-button, .binding-button { border: 1px solid #252525; border-radius: .2rem; padding: .65rem .85rem; background: rgb(255 255 255 / .86); color: inherit; cursor: pointer; }
+
+.room-observer { position: absolute; z-index: 1; inset: 0; touch-action: none; cursor: crosshair; user-select: none; }
+.crosshair { display: none; }
+.fps-installation[data-pointer-locked="true"] .crosshair { position: absolute; top: 50%; left: 50%; display: block; width: .85rem; height: .85rem; transform: translate(-50%, -50%); }
+.fps-installation[data-pointer-locked="true"] .crosshair::before, .fps-installation[data-pointer-locked="true"] .crosshair::after { position: absolute; content: ""; background: rgb(0 0 0 / .8); box-shadow: 0 0 1px #fff; }
+.fps-installation[data-pointer-locked="true"] .crosshair::before { top: calc(50% - 1px); width: 100%; height: 2px; }
+.fps-installation[data-pointer-locked="true"] .crosshair::after { left: calc(50% - 1px); width: 2px; height: 100%; }
+
+.observer-help { position: absolute; z-index: 3; bottom: 1rem; left: 50%; max-width: calc(100% - 2rem); transform: translateX(-50%); margin: 0; padding: .55rem .8rem; border-radius: .25rem; background: rgb(255 255 255 / .86); color: #222; font-size: .875rem; text-align: center; pointer-events: none; }
+.fps-settings { position: absolute; z-index: 5; top: 4.5rem; right: 1rem; width: min(24rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid #272727; border-radius: .35rem; background: rgb(255 255 255 / .96); color: #111; box-shadow: 0 .8rem 2.4rem rgb(0 0 0 / .2); }
+.fps-settings h2 { margin-bottom: .3rem; }
+.settings-note { color: #555; font-size: .85rem; line-height: 1.4; }
+.settings-label, .settings-check { display: grid; gap: .45rem; margin: 1rem 0; font-size: .9rem; }
+.settings-check { grid-template-columns: auto 1fr; align-items: center; }
+.sensitivity-input { width: 100%; }
+.binding-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+.binding-button { min-height: 2.75rem; padding: .4rem .55rem; text-align: left; }
+.binding-button[data-listening="true"] { background: #191919; color: #fff; }
+.graphics-error { position: absolute; z-index: 6; top: 50%; left: 50%; width: min(32rem, calc(100% - 2rem)); transform: translate(-50%, -50%); padding: 1rem; border: 1px solid #842029; background: #f8d7da; color: #842029; line-height: 1.5; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+@media (max-width: 34rem) {
+  .installation-toolbar { align-items: flex-start; }
+  .installation-toolbar > span { display: none; }
+  .toolbar-actions { flex-direction: column; align-items: flex-end; }
+  .enter-fps-button, .fullscreen-button, .settings-button, .back-button { padding: .45rem .6rem; font-size: .82rem; }
+  .binding-list { grid-template-columns: 1fr; }
+}
