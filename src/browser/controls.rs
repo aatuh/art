@@ -112,8 +112,8 @@ impl Session {
             right: self.action_pressed(Action::Right),
             ascend: self.action_pressed(Action::Jump),
             descend: self.action_pressed(Action::Crouch),
-            fast: self.pressed.contains("ShiftLeft") || self.pressed.contains("ShiftRight"),
-            brake: self.pressed.contains("KeyX"),
+            accelerated: self.pressed.contains("ShiftLeft") || self.pressed.contains("ShiftRight"),
+            stop: self.pressed.contains("KeyX"),
         }
     }
 
@@ -346,10 +346,10 @@ pub(super) fn attach_fps_controls(
         }
         if navigation == NavigationMode::Space && !event.repeat() {
             match code.as_str() {
-                "KeyF" => session.spaceflight.focus_earth(),
-                "KeyR" => session.spaceflight.reset_orbital_view(),
-                "KeyZ" => session.spaceflight.adjust_cruise_speed(-1),
-                "KeyC" => session.spaceflight.adjust_cruise_speed(1),
+                "KeyF" => session.spaceflight.point_at_earth(),
+                "KeyR" => session.spaceflight.reset_view(),
+                "KeyZ" => session.spaceflight.adjust_camera_speed(-1),
+                "KeyC" => session.spaceflight.adjust_camera_speed(1),
                 _ => {}
             }
         }
