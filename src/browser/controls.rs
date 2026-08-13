@@ -309,6 +309,7 @@ pub(super) fn attach_fps_controls(
     on_mouse_move.forget();
 
     let session_for_down = Rc::clone(session);
+    let renderer_for_down = Rc::clone(&renderer);
     let on_key_down = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
         let mut session = session_for_down.borrow_mut();
         if !session.active {
@@ -334,7 +335,14 @@ pub(super) fn attach_fps_controls(
         let is_space_command = navigation == NavigationMode::Space
             && matches!(
                 code.as_str(),
-                "ShiftLeft" | "ShiftRight" | "KeyX" | "KeyF" | "KeyR" | "KeyZ" | "KeyC"
+                "ShiftLeft"
+                    | "ShiftRight"
+                    | "KeyX"
+                    | "KeyF"
+                    | "KeyR"
+                    | "KeyZ"
+                    | "KeyC"
+                    | "KeyT"
             );
         if !is_action && !is_space_command {
             return;
@@ -352,6 +360,7 @@ pub(super) fn attach_fps_controls(
                 "KeyR" => session.camera.reset_view(),
                 "KeyZ" => session.camera.adjust_camera_speed(-1),
                 "KeyC" => session.camera.adjust_camera_speed(1),
+                "KeyT" => renderer_for_down.cycle_time_scale(),
                 _ => {}
             }
         }
