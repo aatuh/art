@@ -34,6 +34,7 @@ pub(super) struct PlanetRenderer {
     _buffer: WebGlBuffer,
     _vertex_array: WebGlVertexArrayObject,
     surface_texture: WebGlTexture,
+    land_mask_texture: WebGlTexture,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -55,6 +56,7 @@ struct Uniforms {
     camera_altitude_m: WebGlUniformLocation,
     time: WebGlUniformLocation,
     surface: WebGlUniformLocation,
+    land_mask: WebGlUniformLocation,
 }
 
 impl PlanetRenderer {
@@ -91,6 +93,7 @@ impl PlanetRenderer {
         gl.vertex_attrib_pointer_with_i32(position as u32, 2, Gl::FLOAT, false, 0, 0);
 
         let surface_texture = texture::create(&gl)?;
+        let land_mask_texture = texture::create(&gl)?;
         let uniforms = Uniforms {
             resolution: required_uniform(&gl, &program, "u_resolution")?,
             camera_forward: required_uniform(&gl, &program, "u_camera_forward")?,
@@ -112,8 +115,10 @@ impl PlanetRenderer {
             camera_altitude_m: required_uniform(&gl, &program, "u_camera_altitude_m")?,
             time: required_uniform(&gl, &program, "u_time")?,
             surface: required_uniform(&gl, &program, "u_surface")?,
+            land_mask: required_uniform(&gl, &program, "u_land_mask")?,
         };
         gl.uniform1i(Some(&uniforms.surface), 0);
+        gl.uniform1i(Some(&uniforms.land_mask), 1);
 
         gl.disable(Gl::DEPTH_TEST);
         gl.disable(Gl::BLEND);
@@ -130,6 +135,7 @@ impl PlanetRenderer {
             _buffer: buffer,
             _vertex_array: vertex_array,
             surface_texture,
+            land_mask_texture,
             uniforms,
             clock,
         })
@@ -144,6 +150,9 @@ impl PlanetRenderer {
         self.gl.active_texture(Gl::TEXTURE0);
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
+        self.gl.active_texture(Gl::TEXTURE1);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.land_mask_texture));
 
         let mut clock = self.clock.get();
         let seconds_since_j2000 = clock.advance(now);
