@@ -24,6 +24,10 @@ pub const SUN_NOMINAL_RADIUS_M: f64 = 695_700_000.0;
 
 const J2000_OBLIQUITY_RADIANS: f64 = 0.409_092_804_222_328_97;
 const DEGREES_TO_RADIANS: f64 = std::f64::consts::PI / 180.0;
+/// IERS Conventions (2010) defining Earth Rotation Angle at JD 2451545.0 UT1.
+const J2000_EARTH_ROTATION_ANGLE_TURNS: f64 = 0.779_057_273_264_0;
+/// IERS defining rate of Earth Rotation Angle in revolutions per UT1 day.
+const EARTH_ROTATION_RATE_TURNS_PER_UT1_DAY: f64 = 1.002_737_811_911_354_6;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec3d {
@@ -170,8 +174,7 @@ impl CelestialFrame {
         let days = seconds / SECONDS_PER_DAY;
         let sun = solar_position_m(days);
         let moon = lunar_position_m(days);
-        let earth_rotation_radians = (seconds / EARTH_SIDEREAL_ROTATION_S * std::f64::consts::TAU)
-            .rem_euclid(std::f64::consts::TAU);
+        let earth_rotation_radians = earth_rotation_angle_radians(seconds);
 
         Self {
             seconds_since_j2000: seconds,
@@ -296,6 +299,24 @@ pub fn apparent_angular_radius_radians(radius_m: f64, distance_m: f64) -> f64 {
     (radius_m / distance_m).clamp(0.0, 1.0).asin()
 }
 
+/// IERS Earth Rotation Angle using `seconds_since_j2000` as an approximate UT1 interval.
+///
+/// Browser wall time is UTC, not UT1, so this intentionally omits DUT1 and polar motion.
+/// It nevertheless preserves the defining J2000 phase and rotation rate instead of
+/// arbitrarily setting Greenwich to zero at the epoch.
+pub fn earth_rotation_angle_radians(seconds_since_j2000: f64) -> f64 {
+    let seconds = if seconds_since_j2000.is_finite() {
+        seconds_since_j2000
+    } else {
+        0.0
+    };
+    let ut1_days = seconds / SECONDS_PER_DAY;
+    (std::f64::consts::TAU
+        * (J2000_EARTH_ROTATION_ANGLE_TURNS
+            + EARTH_ROTATION_RATE_TURNS_PER_UT1_DAY * ut1_days))
+        .rem_euclid(std::f64::consts::TAU)
+}
+
 fn solar_position_m(days_since_j2000: f64) -> Vec3d {
     let mean_anomaly = radians(357.529 + 0.985_600_28 * days_since_j2000);
     let mean_longitude = radians(280.459 + 0.985_647_36 * days_since_j2000);
@@ -349,6 +370,35 @@ mod tests {
         assert!((moon_ratio - 0.2725).abs() < 0.001);
         assert!((sun_ratio - 109.08).abs() < 0.1);
         assert!((lunar_distance_ratio - 60.27).abs() < 0.1);
+    }
+
+    #[test]
+    fn iers_earth_rotation_angle_has_the_correct_j2000_phase() {
+        let angle = earth_rotation_angle_radians(0.0);
+        let expected = std::f64::consts::TAU * J2000_EARTH_ROTATION_ANGLE_TURNS;
+        assert!((angle - expected).abs() < 1.0e-14);
+        assert!((angle.to_degrees() - 280.460_618_375_04).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn iers_earth_rotation_rate_matches_the_sidereal_day() {
+        let derived_sidereal_day = SECONDS_PER_DAY / EARTH_ROTATION_RATE_TURNS_PER_UT1_DAY;
+        assert!((derived_sidereal_day - EARTH_SIDEREAL_ROTATION_S).abs() < 0.02);
+
+        let initial = earth_rotation_angle_radians(0.0);
+        let after_sidereal_day = earth_rotation_angle_radians(derived_sidereal_day);
+        let wrapped_difference = (after_sidereal_day - initial)
+            .rem_euclid(std::f64::consts::TAU)
+            .min((initial - after_sidereal_day).rem_euclid(std::f64::consts::TAU));
+        assert!(wrapped_difference < 1.0e-12);
+    }
+
+    #[test]
+    fn nonfinite_rotation_time_falls_back_to_j2000() {
+        let j2000 = earth_rotation_angle_radians(0.0);
+        for seconds in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(earth_rotation_angle_radians(seconds), j2000);
+        }
     }
 
     #[test]
