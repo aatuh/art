@@ -147,6 +147,21 @@ impl PlanetRenderer {
         })
     }
 
+    pub(super) fn cycle_time_scale(&self) {
+        let mut state = self.clock.get();
+        let scale = state.cycle_scale();
+        self.clock.set(state);
+        if let Some(installation) = self.canvas.parent_element()
+            && let Ok(Some(button)) = installation.query_selector(".time-scale-button")
+        {
+            let _ = update_time_button(&button, scale);
+        }
+    }
+
+    pub(super) fn time_scale(&self) -> f64 {
+        self.clock.get().scale()
+    }
+
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
         self.try_upload_high_resolution_surface();
         let (width, height) = resize_canvas(&self.canvas);
