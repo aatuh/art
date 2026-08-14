@@ -1,8 +1,11 @@
 //! Cube-sphere quadtree addressing for future multiscale Earth surface streaming.
 
+use std::collections::BTreeSet;
+
 use crate::planet::{EARTH_MEAN_RADIUS_M, Vec3d};
 
 pub const MAX_STREAMING_LEVEL: u8 = 18;
+pub const MAX_WORKING_SET_RADIUS_TILES: u8 = 4;
 const MIN_TARGET_TILE_EDGE_M: f64 = 250.0;
 const ALTITUDE_TO_TILE_EDGE_RATIO: f64 = 0.5;
 
@@ -28,8 +31,10 @@ impl CubeFace {
 
     /// Maps face-local coordinates in [-1, 1]² onto a normalized cube-sphere direction.
     pub fn direction(self, u: f64, v: f64) -> Vec3d {
-        let u = u.clamp(-1.0, 1.0);
-        let v = v.clamp(-1.0, 1.0);
+        self.direction_unbounded(u.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0))
+    }
+
+    fn direction_unbounded(self, u: f64, v: f64) -> Vec3d {
         let cube = match self {
             Self::PositiveX => Vec3d::new(1.0, v, -u),
             Self::NegativeX => Vec3d::new(-1.0, v, u),
@@ -152,6 +157,17 @@ impl TileId {
         let v = ((f64::from(self.y) + 0.5) / side) * 2.0 - 1.0;
         self.face.direction(u, v)
     }
+
+    /// Moves by tile-sized steps and remaps through neighboring cube faces when needed.
+    pub fn offset(self, x_steps: i32, y_steps: i32) -> Option<Self> {
+        let side = f64::from(1_u32 << self.level);
+        let tile_span = 2.0 / side;
+        let u = ((f64::from(self.x) + 0.5) / side) * 2.0 - 1.0
+            + f64::from(x_steps) * tile_span;
+        let v = ((f64::from(self.y) + 0.5) / side) * 2.0 - 1.0
+            + f64::from(y_steps) * tile_span;
+        Self::from_direction(self.face.direction_unbounded(u, v), self.level)
+    }
 }
 
 /// Approximate surface edge length represented by one cube-face tile.
@@ -175,11 +191,38 @@ pub fn surface_tile_level_for_altitude(altitude_m: f64) -> u8 {
     MAX_STREAMING_LEVEL
 }
 
+/// Returns a deterministic square working set around the surface point beneath the camera.
+///
+/// Offsets crossing a cube-face edge are remapped onto the adjacent face. The radius is
+/// bounded so a malformed caller cannot request an unbounded number of tiles per frame.
+pub fn surface_tile_working_set(
+    surface_direction: Vec3d,
+    altitude_m: f64,
+    radius_tiles: u8,
+) -> Vec<TileId> {
+    let level = surface_tile_level_for_altitude(altitude_m);
+    let Some(center) = TileId::from_direction(surface_direction, level) else {
+        return Vec::new();
+    };
+    let radius = i32::from(radius_tiles.min(MAX_WORKING_SET_RADIUS_TILES));
+    let mut tiles = BTreeSet::new();
+    for y_step in -radius..=radius {
+        for x_step in -radius..=radius {
+            if let Some(tile) = center.offset(x_step, y_step) {
+                tiles.insert(tile);
+            }
+        }
+    }
+    tiles.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
         CubeFace, MAX_STREAMING_LEVEL, TileId, face_uv, surface_tile_level_for_altitude,
-        tile_edge_m,
+        surface_tile_working_set, tile_edge_m,
     };
     use crate::planet::Vec3d;
 
@@ -230,6 +273,14 @@ mod tests {
     }
 
     #[test]
+    fn tile_offsets_cross_cube_faces_without_changing_level() {
+        let edge = TileId::new(CubeFace::PositiveZ, 4, 0, 7).expect("valid edge tile");
+        let neighbor = edge.offset(-1, 0).expect("cross-face neighbor");
+        assert_ne!(neighbor.face, edge.face);
+        assert_eq!(neighbor.level, edge.level);
+    }
+
+    #[test]
     fn tile_edges_halve_at_each_level() {
         for level in 0..MAX_STREAMING_LEVEL {
             let ratio = tile_edge_m(level) / tile_edge_m(level + 1);
@@ -247,5 +298,32 @@ mod tests {
         assert!(low_orbit < aircraft);
         assert!(aircraft < ground);
         assert_eq!(surface_tile_level_for_altitude(f64::NAN), 0);
+    }
+
+    #[test]
+    fn working_set_is_deterministic_and_unique_on_one_face() {
+        let direction = CubeFace::PositiveZ.direction(0.0, 0.0);
+        let first = surface_tile_working_set(direction, 400_000.0, 1);
+        let second = surface_tile_working_set(direction, 400_000.0, 1);
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 9);
+        assert_eq!(first.iter().copied().collect::<BTreeSet<_>>().len(), 9);
+        assert!(first.iter().all(|tile| tile.face == CubeFace::PositiveZ));
+    }
+
+    #[test]
+    fn working_set_crosses_faces_near_cube_edges() {
+        let direction = CubeFace::PositiveZ.direction(-0.999, 0.0);
+        let tiles = surface_tile_working_set(direction, 400_000.0, 1);
+        let faces = tiles.iter().map(|tile| tile.face).collect::<BTreeSet<_>>();
+        assert!(faces.len() > 1);
+        assert!(tiles.iter().all(|tile| tile.level == tiles[0].level));
+    }
+
+    #[test]
+    fn working_set_radius_is_bounded() {
+        let direction = CubeFace::PositiveZ.direction(0.0, 0.0);
+        let bounded = surface_tile_working_set(direction, 400_000.0, 255);
+        assert!(bounded.len() <= 81);
     }
 }
