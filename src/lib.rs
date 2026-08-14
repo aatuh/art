@@ -8,6 +8,7 @@ pub mod exhibition_camera;
 pub mod fps;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
+pub mod navigation_display;
 pub mod planet;
 pub mod planet_shader;
 pub mod planet_tiles;
