@@ -435,10 +435,11 @@ mod tests {
             plan.fallback.iter().copied().collect::<BTreeSet<_>>().len(),
             plan.fallback.len()
         );
-        assert!(plan
-            .fallback
-            .windows(2)
-            .all(|pair| pair[0].level <= pair[1].level));
+        assert!(
+            plan.fallback
+                .windows(2)
+                .all(|pair| pair[0].level <= pair[1].level)
+        );
     }
 
     #[test]
@@ -471,11 +472,15 @@ mod tests {
             .iter()
             .position(|request| request.tile.level == plan.level)
             .expect("primary request");
-        assert!(requests[..first_primary]
-            .iter()
-            .all(|request| request.tile.level < plan.level));
-        assert!(requests[first_primary..]
-            .iter()
-            .all(|request| request.tile.level == plan.level));
+        assert!(
+            requests[..first_primary]
+                .iter()
+                .all(|request| request.tile.level < plan.level)
+        );
+        assert!(
+            requests[first_primary..]
+                .iter()
+                .all(|request| request.tile.level == plan.level)
+        );
     }
 }
