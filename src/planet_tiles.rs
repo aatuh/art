@@ -54,44 +54,20 @@ pub fn face_uv(direction: Vec3d) -> (CubeFace, f64, f64) {
     let az = direction.z.abs();
     if ax >= ay && ax >= az {
         if direction.x >= 0.0 {
-            (
-                CubeFace::PositiveX,
-                -direction.z / ax,
-                direction.y / ax,
-            )
+            (CubeFace::PositiveX, -direction.z / ax, direction.y / ax)
         } else {
-            (
-                CubeFace::NegativeX,
-                direction.z / ax,
-                direction.y / ax,
-            )
+            (CubeFace::NegativeX, direction.z / ax, direction.y / ax)
         }
     } else if ay >= az {
         if direction.y >= 0.0 {
-            (
-                CubeFace::PositiveY,
-                direction.x / ay,
-                -direction.z / ay,
-            )
+            (CubeFace::PositiveY, direction.x / ay, -direction.z / ay)
         } else {
-            (
-                CubeFace::NegativeY,
-                direction.x / ay,
-                direction.z / ay,
-            )
+            (CubeFace::NegativeY, direction.x / ay, direction.z / ay)
         }
     } else if direction.z >= 0.0 {
-        (
-            CubeFace::PositiveZ,
-            direction.x / az,
-            direction.y / az,
-        )
+        (CubeFace::PositiveZ, direction.x / az, direction.y / az)
     } else {
-        (
-            CubeFace::NegativeZ,
-            -direction.x / az,
-            direction.y / az,
-        )
+        (CubeFace::NegativeZ, -direction.x / az, direction.y / az)
     }
 }
 
@@ -119,8 +95,8 @@ impl TileId {
         let (face, u, v) = face_uv(direction);
         let side = 1_u32 << level;
         let to_index = |coordinate: f64| {
-            let normalized = ((coordinate.clamp(-1.0, 1.0) + 1.0) * 0.5)
-                .clamp(0.0, 1.0 - f64::EPSILON);
+            let normalized =
+                ((coordinate.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0 - f64::EPSILON);
             (normalized * f64::from(side)).floor() as u32
         };
         Self::new(face, level, to_index(u), to_index(v))
@@ -189,8 +165,8 @@ pub fn surface_tile_level_for_altitude(altitude_m: f64) -> u8 {
     if !altitude_m.is_finite() {
         return 0;
     }
-    let target_edge_m = (altitude_m.max(0.0) * ALTITUDE_TO_TILE_EDGE_RATIO)
-        .max(MIN_TARGET_TILE_EDGE_M);
+    let target_edge_m =
+        (altitude_m.max(0.0) * ALTITUDE_TO_TILE_EDGE_RATIO).max(MIN_TARGET_TILE_EDGE_M);
     for level in 0..=MAX_STREAMING_LEVEL {
         if tile_edge_m(level) <= target_edge_m {
             return level;
@@ -247,7 +223,10 @@ mod tests {
     #[test]
     fn direction_lookup_selects_the_tile_containing_its_center() {
         let tile = TileId::new(CubeFace::NegativeX, 8, 44, 191).expect("valid tile");
-        assert_eq!(TileId::from_direction(tile.center_direction(), 8), Some(tile));
+        assert_eq!(
+            TileId::from_direction(tile.center_direction(), 8),
+            Some(tile)
+        );
     }
 
     #[test]
