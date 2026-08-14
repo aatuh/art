@@ -335,14 +335,7 @@ pub(super) fn attach_fps_controls(
         let is_space_command = navigation == NavigationMode::Space
             && matches!(
                 code.as_str(),
-                "ShiftLeft"
-                    | "ShiftRight"
-                    | "KeyX"
-                    | "KeyF"
-                    | "KeyR"
-                    | "KeyZ"
-                    | "KeyC"
-                    | "KeyT"
+                "ShiftLeft" | "ShiftRight" | "KeyX" | "KeyF" | "KeyR" | "KeyZ" | "KeyC" | "KeyT"
             );
         if !is_action && !is_space_command {
             return;
