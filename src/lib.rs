@@ -3,6 +3,7 @@
 pub mod artwork;
 pub mod artworks;
 pub mod camera_api;
+pub mod earth_coordinates;
 pub mod exhibition_camera;
 pub mod fps;
 #[cfg(any(test, target_arch = "wasm32"))]
