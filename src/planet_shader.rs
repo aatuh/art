@@ -82,7 +82,9 @@ mod tests {
     fn composed_shader_replaces_the_legacy_ocean_normal() {
         let shader = fragment_source().expect("stable planet shader markers");
         assert_eq!(
-            shader.matches("float deep_water_angular_frequency(").count(),
+            shader
+                .matches("float deep_water_angular_frequency(")
+                .count(),
             1
         );
         assert_eq!(shader.matches("vec3 ocean_normal(").count(), 1);
