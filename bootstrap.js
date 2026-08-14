@@ -3,7 +3,7 @@ import init from "./pkg/gallery.js";
 const galleryRoot = document.getElementById("gallery");
 
 function setText(element, text) {
-  if (element) element.textContent = text;
+  if (element && element.textContent !== text) element.textContent = text;
 }
 
 function syncAstronomicalInstallationCopy() {
