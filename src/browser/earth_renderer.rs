@@ -29,6 +29,7 @@ const UNIX_SECONDS_AT_J2000: f64 = 946_728_000.0;
 const MAX_DEVICE_PIXEL_RATIO: f64 = 2.0;
 const EARTH_SURFACE_512_WEBP_B64: &str = include_str!("earth_surface_512.webp.b64");
 const EARTH_ELEVATION_512_PNG_B64: &str = include_str!("earth_elevation_512.png.b64");
+const EARTH_REGIONAL_SURFACE_PATH: &str = "./assets/earth/earth-surface-1024.webp";
 
 pub(super) struct PlanetRenderer {
     canvas: HtmlCanvasElement,
@@ -38,13 +39,17 @@ pub(super) struct PlanetRenderer {
     _vertex_array: WebGlVertexArrayObject,
     global_surface_texture: WebGlTexture,
     orbital_surface_texture: WebGlTexture,
+    regional_surface_texture: WebGlTexture,
     land_mask_texture: WebGlTexture,
     elevation_texture: WebGlTexture,
     surface_image: HtmlImageElement,
+    regional_surface_image: HtmlImageElement,
     elevation_image: HtmlImageElement,
     surface_image_upload_attempted: Cell<bool>,
+    regional_surface_image_upload_attempted: Cell<bool>,
     elevation_image_upload_attempted: Cell<bool>,
     orbital_surface_ready: Cell<bool>,
+    regional_surface_ready: Cell<bool>,
     elevation_ready: Cell<bool>,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
@@ -107,9 +112,11 @@ impl PlanetRenderer {
 
         let global_surface_texture = texture::create(&gl)?;
         let orbital_surface_texture = texture::create(&gl)?;
+        let regional_surface_texture = texture::create(&gl)?;
         let land_mask_texture = texture::create(&gl)?;
         let elevation_texture = texture::create(&gl)?;
         let surface_image = create_data_image("image/webp", EARTH_SURFACE_512_WEBP_B64)?;
+        let regional_surface_image = create_asset_image(EARTH_REGIONAL_SURFACE_PATH)?;
         let elevation_image = create_data_image("image/png", EARTH_ELEVATION_512_PNG_B64)?;
         let uniforms = Uniforms {
             resolution: required_uniform(&gl, &program, "u_resolution")?,
@@ -156,13 +163,17 @@ impl PlanetRenderer {
             _vertex_array: vertex_array,
             global_surface_texture,
             orbital_surface_texture,
+            regional_surface_texture,
             land_mask_texture,
             elevation_texture,
             surface_image,
+            regional_surface_image,
             elevation_image,
             surface_image_upload_attempted: Cell::new(false),
+            regional_surface_image_upload_attempted: Cell::new(false),
             elevation_image_upload_attempted: Cell::new(false),
             orbital_surface_ready: Cell::new(false),
+            regional_surface_ready: Cell::new(false),
             elevation_ready: Cell::new(false),
             uniforms,
             clock,
@@ -186,6 +197,7 @@ impl PlanetRenderer {
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
         self.try_upload_orbital_surface();
+        self.try_upload_regional_surface();
         self.try_upload_elevation();
         let (width, height) = resize_canvas(&self.canvas);
         self.gl.viewport(0, 0, width as i32, height as i32);
@@ -194,10 +206,15 @@ impl PlanetRenderer {
         self.gl.use_program(Some(&self.program));
 
         let camera_altitude_m = visitor.radial_altitude_above_earth_m().max(0.0);
-        let surface_tier = select_surface_tier(camera_altitude_m, self.orbital_surface_ready.get());
+        let surface_tier = select_surface_tier(
+            camera_altitude_m,
+            self.orbital_surface_ready.get(),
+            self.regional_surface_ready.get(),
+        );
         let surface_texture = match surface_tier {
             SurfaceTier::Global => &self.global_surface_texture,
             SurfaceTier::Orbital => &self.orbital_surface_texture,
+            SurfaceTier::Regional => &self.regional_surface_texture,
         };
         self.gl.active_texture(Gl::TEXTURE0);
         self.gl.bind_texture(Gl::TEXTURE_2D, Some(surface_texture));
@@ -287,6 +304,23 @@ impl PlanetRenderer {
         }
     }
 
+    fn try_upload_regional_surface(&self) {
+        if self.regional_surface_image_upload_attempted.get()
+            || !self.regional_surface_image.complete()
+            || self.regional_surface_image.natural_width() == 0
+        {
+            return;
+        }
+        self.regional_surface_image_upload_attempted.set(true);
+        self.gl.active_texture(Gl::TEXTURE0);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.regional_surface_texture));
+        match upload_image_to_bound_texture(&self.gl, &self.regional_surface_image) {
+            Ok(()) => self.regional_surface_ready.set(true),
+            Err(error) => web_sys::console::warn_1(&error),
+        }
+    }
+
     fn try_upload_elevation(&self) {
         if self.elevation_image_upload_attempted.get()
             || !self.elevation_image.complete()
@@ -324,6 +358,12 @@ fn upload_image_to_bound_texture(gl: &Gl, image: &HtmlImageElement) -> Result<()
 fn create_data_image(media_type: &str, encoded: &str) -> Result<HtmlImageElement, JsValue> {
     let image = HtmlImageElement::new()?;
     image.set_src(&format!("data:{media_type};base64,{}", encoded.trim()));
+    Ok(image)
+}
+
+fn create_asset_image(source: &str) -> Result<HtmlImageElement, JsValue> {
+    let image = HtmlImageElement::new()?;
+    image.set_src(source);
     Ok(image)
 }
 
