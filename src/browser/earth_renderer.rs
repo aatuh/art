@@ -20,6 +20,7 @@ use crate::{
         MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M, Vec3d,
     },
     simulation_clock::SimulationClock,
+    surface_lod::{SurfaceTier, select_surface_tier},
 };
 
 use super::dom::window;
@@ -34,10 +35,12 @@ pub(super) struct PlanetRenderer {
     program: WebGlProgram,
     _buffer: WebGlBuffer,
     _vertex_array: WebGlVertexArrayObject,
-    surface_texture: WebGlTexture,
+    global_surface_texture: WebGlTexture,
+    orbital_surface_texture: WebGlTexture,
     land_mask_texture: WebGlTexture,
     surface_image: HtmlImageElement,
     surface_image_upload_attempted: Cell<bool>,
+    orbital_surface_ready: Cell<bool>,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -95,7 +98,8 @@ impl PlanetRenderer {
         gl.enable_vertex_attrib_array(position as u32);
         gl.vertex_attrib_pointer_with_i32(position as u32, 2, Gl::FLOAT, false, 0, 0);
 
-        let surface_texture = texture::create(&gl)?;
+        let global_surface_texture = texture::create(&gl)?;
+        let orbital_surface_texture = texture::create(&gl)?;
         let land_mask_texture = texture::create(&gl)?;
         let surface_image = create_surface_image()?;
         let uniforms = Uniforms {
@@ -138,10 +142,12 @@ impl PlanetRenderer {
             program,
             _buffer: buffer,
             _vertex_array: vertex_array,
-            surface_texture,
+            global_surface_texture,
+            orbital_surface_texture,
             land_mask_texture,
             surface_image,
             surface_image_upload_attempted: Cell::new(false),
+            orbital_surface_ready: Cell::new(false),
             uniforms,
             clock,
         })
@@ -163,15 +169,22 @@ impl PlanetRenderer {
     }
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
-        self.try_upload_high_resolution_surface();
+        self.try_upload_orbital_surface();
         let (width, height) = resize_canvas(&self.canvas);
         self.gl.viewport(0, 0, width as i32, height as i32);
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
         self.gl.clear(Gl::COLOR_BUFFER_BIT);
         self.gl.use_program(Some(&self.program));
+
+        let camera_altitude_m = visitor.radial_altitude_above_earth_m().max(0.0);
+        let surface_tier = select_surface_tier(camera_altitude_m, self.orbital_surface_ready.get());
+        let surface_texture = match surface_tier {
+            SurfaceTier::Global => &self.global_surface_texture,
+            SurfaceTier::Orbital => &self.orbital_surface_texture,
+        };
         self.gl.active_texture(Gl::TEXTURE0);
         self.gl
-            .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
+            .bind_texture(Gl::TEXTURE_2D, Some(surface_texture));
         self.gl.active_texture(Gl::TEXTURE1);
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.land_mask_texture));
@@ -227,14 +240,14 @@ impl PlanetRenderer {
         );
         self.gl.uniform1f(
             Some(&self.uniforms.camera_altitude_m),
-            visitor.radial_altitude_above_earth_m().max(0.0) as f32,
+            camera_altitude_m as f32,
         );
         self.gl
             .uniform1f(Some(&self.uniforms.time), animation_seconds as f32);
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
     }
 
-    fn try_upload_high_resolution_surface(&self) {
+    fn try_upload_orbital_surface(&self) {
         if self.surface_image_upload_attempted.get()
             || !self.surface_image.complete()
             || self.surface_image.natural_width() == 0
@@ -244,7 +257,7 @@ impl PlanetRenderer {
         self.surface_image_upload_attempted.set(true);
         self.gl.active_texture(Gl::TEXTURE0);
         self.gl
-            .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.orbital_surface_texture));
         match self
             .gl
             .tex_image_2d_with_u32_and_u32_and_html_image_element(
@@ -255,7 +268,10 @@ impl PlanetRenderer {
                 Gl::UNSIGNED_BYTE,
                 &self.surface_image,
             ) {
-            Ok(()) => self.gl.generate_mipmap(Gl::TEXTURE_2D),
+            Ok(()) => {
+                self.gl.generate_mipmap(Gl::TEXTURE_2D);
+                self.orbital_surface_ready.set(true);
+            }
             Err(error) => web_sys::console::warn_1(&error),
         }
     }
