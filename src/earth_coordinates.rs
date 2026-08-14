@@ -13,10 +13,7 @@ pub fn inertial_to_earth_fixed(direction: Vec3d, earth_rotation_radians: f64) ->
 
 /// Converts an Earth-fixed direction back into the inertial scene frame.
 pub fn earth_fixed_to_inertial(direction: Vec3d, earth_rotation_radians: f64) -> Vec3d {
-    rotate_y(
-        direction.normalized(),
-        finite_angle(earth_rotation_radians),
-    )
+    rotate_y(direction.normalized(), finite_angle(earth_rotation_radians))
 }
 
 fn finite_angle(angle: f64) -> f64 {
@@ -63,9 +60,6 @@ mod tests {
 
     #[test]
     fn zero_direction_remains_zero() {
-        assert_eq!(
-            inertial_to_earth_fixed(Vec3d::ZERO, 1.5),
-            Vec3d::ZERO
-        );
+        assert_eq!(inertial_to_earth_fixed(Vec3d::ZERO, 1.5), Vec3d::ZERO);
     }
 }
