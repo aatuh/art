@@ -1,5 +1,6 @@
-//! Deterministic composition of the planetary fragment shader from small effect modules.
+//! Deterministic planetary shader selection and detailed-shader composition.
 
+const PLANET_ORBITAL_FRAGMENT: &str = include_str!("browser/shaders/planet_orbital.frag.glsl");
 const PLANET_FRAGMENT_BASE: &str = include_str!("browser/shaders/planet_v4.frag.glsl");
 const OCEAN_SURFACE_MODULE: &str = include_str!("browser/shaders/ocean_surface.glsl");
 const TERRAIN_SHADOW_MODULE: &str = include_str!("browser/shaders/terrain_shadow.glsl");
@@ -72,11 +73,19 @@ const DIRECT_LIGHT_REPLACEMENT: &str = r#"    float terrain_light = n_dot_l > 0.
         : 1.0;
     float direct = n_dot_l * visibility * cloud_light * terrain_light;"#;
 
-/// Builds the fragment shader with modular multiscale surface and lighting effects.
+/// Shader compiled synchronously when the visitor enters the Earth installation.
 ///
-/// Keeping physical effects behind exact composition markers lets them evolve without turning
-/// the already-large planet shader into a merge-sensitive monolith.
+/// Keep this intentionally small. Browser/driver GLSL compilation occurs on the UI path on
+/// some platforms, so compiling the full near-surface raymarcher here can make the tab appear
+/// hung or trip a GPU watchdog before the first frame is drawn.
 pub fn fragment_source() -> Result<String, &'static str> {
+    Ok(PLANET_ORBITAL_FRAGMENT.to_owned())
+}
+
+/// Builds the higher-cost near-surface shader without making it part of installation startup.
+///
+/// The detailed program stays independently validated while it is split into safe LOD programs.
+pub fn detailed_fragment_source() -> Result<String, &'static str> {
     let with_ocean = replace_exactly_once(
         PLANET_FRAGMENT_BASE,
         OCEAN_NORMAL_BASE,
@@ -131,11 +140,22 @@ fn replace_exactly_once(
 
 #[cfg(test)]
 mod tests {
-    use super::{fragment_source, replace_exactly_once};
+    use super::{detailed_fragment_source, fragment_source, replace_exactly_once};
 
     #[test]
-    fn composed_shader_contains_one_terrain_shadow_function_and_use_site() {
-        let shader = fragment_source().expect("stable planet shader markers");
+    fn startup_shader_stays_performance_safe() {
+        let shader = fragment_source().expect("static orbital shader");
+        assert!(shader.contains("vec3 shade_earth("));
+        assert!(shader.contains("float cheap_clouds("));
+        assert!(!shader.contains("integrate_clouds("));
+        assert!(!shader.contains("integrate_atmosphere("));
+        assert!(!shader.contains("intersect_terrain("));
+        assert!(!shader.contains("terrain_shadow_visibility("));
+    }
+
+    #[test]
+    fn detailed_shader_contains_one_terrain_shadow_function_and_use_site() {
+        let shader = detailed_fragment_source().expect("stable planet shader markers");
         assert_eq!(
             shader.matches("float terrain_shadow_visibility(").count(),
             1
@@ -145,8 +165,8 @@ mod tests {
     }
 
     #[test]
-    fn composed_shader_replaces_the_legacy_ocean_normal() {
-        let shader = fragment_source().expect("stable planet shader markers");
+    fn detailed_shader_replaces_the_legacy_ocean_normal() {
+        let shader = detailed_fragment_source().expect("stable planet shader markers");
         assert_eq!(
             shader
                 .matches("float deep_water_angular_frequency(")
@@ -158,8 +178,8 @@ mod tests {
     }
 
     #[test]
-    fn composed_shader_limits_atmosphere_work_per_fragment() {
-        let shader = fragment_source().expect("stable planet shader markers");
+    fn detailed_shader_limits_atmosphere_work_per_fragment() {
+        let shader = detailed_fragment_source().expect("stable planet shader markers");
         assert!(shader.contains("int atmosphere_sample_count"));
         assert!(shader.contains("? 10"));
         assert!(shader.contains("? 8 : 6"));
@@ -167,8 +187,8 @@ mod tests {
     }
 
     #[test]
-    fn composed_shader_limits_cloud_work_per_fragment() {
-        let shader = fragment_source().expect("stable planet shader markers");
+    fn detailed_shader_limits_cloud_work_per_fragment() {
+        let shader = detailed_fragment_source().expect("stable planet shader markers");
         assert!(shader.contains("int cloud_sample_count"));
         assert!(shader.contains("? 8"));
         assert!(shader.contains("? 6 : 4"));
