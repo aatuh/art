@@ -16,6 +16,20 @@ const OCEAN_NORMAL_BASE: &str = r#"vec3 ocean_normal(vec3 point, vec3 geometric)
     float wave_c = noise3(local * 950.0 + vec3(time * 0.02, 0.0, -time * 0.015)) * 2.0 - 1.0;
     return normalize(geometric + tangent * (wave_a + wave_c) * 0.012 + bitangent * wave_b * 0.010);
 }"#;
+const CLOUD_RAYMARCH_BASE: &str = r#"    float step_length = (end_distance - start_distance) / 8.0;
+    for (int sample_index = 0; sample_index < 8; ++sample_index) {
+        float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
+const CLOUD_RAYMARCH_REPLACEMENT: &str = r#"    int sample_count = u_camera_altitude_m < 500000.0
+        ? 16
+        : (u_camera_altitude_m < 2000000.0 ? 12 : 8);
+    float step_length = (end_distance - start_distance) / float(sample_count);
+    float sample_jitter = mix(0.2, 0.8, hash31(vec3(gl_FragCoord.xy, 17.0)));
+    for (int sample_index = 0; sample_index < 16; ++sample_index) {
+        if (sample_index >= sample_count) {
+            break;
+        }
+        float distance_along_ray =
+            start_distance + (float(sample_index) + sample_jitter) * step_length;"#;
 const SHADOW_INSERTION_MARKER: &str =
     "float cloud_shadow(vec3 surface_point, vec3 light_direction) {";
 const DIRECT_LIGHT_MARKER: &str = "    float direct = n_dot_l * visibility * cloud_light;";
@@ -24,10 +38,10 @@ const DIRECT_LIGHT_REPLACEMENT: &str = r#"    float terrain_light = n_dot_l > 0.
         : 1.0;
     float direct = n_dot_l * visibility * cloud_light * terrain_light;"#;
 
-/// Builds the fragment shader with modular ocean and terrain-lighting effects.
+/// Builds the fragment shader with modular multiscale surface and lighting effects.
 ///
-/// Keeping physical effects in small GLSL modules lets them evolve without turning the
-/// already-large planet shader into a merge-sensitive monolith.
+/// Keeping physical effects behind exact composition markers lets them evolve without turning
+/// the already-large planet shader into a merge-sensitive monolith.
 pub fn fragment_source() -> Result<String, &'static str> {
     let with_ocean = replace_exactly_once(
         PLANET_FRAGMENT_BASE,
@@ -35,9 +49,15 @@ pub fn fragment_source() -> Result<String, &'static str> {
         OCEAN_SURFACE_MODULE.trim_end(),
         "planet shader ocean-normal marker is missing or duplicated",
     )?;
+    let with_cloud_quality = replace_exactly_once(
+        &with_ocean,
+        CLOUD_RAYMARCH_BASE,
+        CLOUD_RAYMARCH_REPLACEMENT,
+        "planet shader cloud-raymarch marker is missing or duplicated",
+    )?;
     let shadow_insertion = format!("{TERRAIN_SHADOW_MODULE}\n\n{SHADOW_INSERTION_MARKER}");
     let with_shadow = replace_exactly_once(
-        &with_ocean,
+        &with_cloud_quality,
         SHADOW_INSERTION_MARKER,
         &shadow_insertion,
         "planet shader terrain-shadow insertion marker is missing or duplicated",
@@ -89,6 +109,16 @@ mod tests {
         );
         assert_eq!(shader.matches("vec3 ocean_normal(").count(), 1);
         assert!(!shader.contains("float wave_a = sin("));
+    }
+
+    #[test]
+    fn composed_shader_adapts_cloud_samples_to_camera_altitude() {
+        let shader = fragment_source().expect("stable planet shader markers");
+        assert!(shader.contains("u_camera_altitude_m < 500000.0"));
+        assert!(shader.contains("u_camera_altitude_m < 2000000.0"));
+        assert!(shader.contains("sample_index < 16"));
+        assert!(shader.contains("sample_jitter"));
+        assert!(!shader.contains("sample_index < 8"));
     }
 
     #[test]
