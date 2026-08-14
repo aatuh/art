@@ -20,6 +20,7 @@ uniform float u_earth_rotation;
 uniform float u_camera_altitude_m;
 uniform float u_time;
 uniform sampler2D u_surface;
+uniform sampler2D u_land_mask;
 
 const float PI = 3.141592653589793;
 const float TAU = 6.283185307179586;
@@ -164,11 +165,15 @@ vec4 earth_reference(vec3 local_direction) {
     return texture(u_surface, earth_uv_from_local(local_direction));
 }
 
+float land_reference(vec3 local_direction) {
+    return texture(u_land_mask, earth_uv_from_local(local_direction)).a;
+}
+
 float land_mask(vec3 local_direction) {
-    vec4 reference = earth_reference(local_direction);
-    float edge = 1.0 - abs(reference.a * 2.0 - 1.0);
+    float reference = land_reference(local_direction);
+    float edge = 1.0 - abs(reference * 2.0 - 1.0);
     float breakup = (fbm(local_direction * 90.0 + vec3(3.0, 7.0, -4.0)) - 0.5) * 0.16 * edge;
-    return smoothstep(0.32, 0.68, reference.a + breakup);
+    return smoothstep(0.32, 0.68, reference + breakup);
 }
 
 float wrapped_longitude_distance(float longitude, float center) {
@@ -485,6 +490,7 @@ float solar_visibility(vec3 point, vec3 blocker_center, float blocker_radius) {
 vec3 shade_earth(vec3 point, vec3 ray_direction) {
     vec3 local = earth_fixed_direction(point);
     vec4 reference = earth_reference(local);
+    float land_reference_value = land_reference(local);
     float land = land_mask(local);
     vec3 geometric = geometric_earth_normal(point);
     vec3 normal = mix(ocean_normal(point, geometric), terrain_normal(point, land), land);
@@ -532,7 +538,7 @@ vec3 shade_earth(vec3 point, vec3 ray_direction) {
         * land * (1.0 - snow);
     color += vec3(1.0, 0.42, 0.10) * settlement * night * 1.5;
 
-    float coast_edge = 1.0 - abs(reference.a * 2.0 - 1.0);
+    float coast_edge = 1.0 - abs(land_reference_value * 2.0 - 1.0);
     float foam = coast_edge * (1.0 - land) * saturate(0.4 + 0.6 * sin(u_time * 1.3 + local.x * 900.0));
     color += vec3(0.55, 0.70, 0.78) * foam * n_dot_l * 0.18;
 
