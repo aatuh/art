@@ -21,11 +21,15 @@ uniform float u_camera_altitude_m;
 uniform float u_time;
 uniform sampler2D u_surface;
 uniform sampler2D u_land_mask;
+uniform sampler2D u_elevation;
+uniform float u_elevation_ready;
 
 const float PI = 3.141592653589793;
 const float TAU = 6.283185307179586;
 const float INF = 1.0e30;
-const float MAX_TERRAIN_M = 8500.0;
+const float MIN_ELEVATION_SOURCE_M = -11000.0;
+const float MAX_ELEVATION_SOURCE_M = 9000.0;
+const float MAX_TERRAIN_M = 9000.0;
 const float CLOUD_BASE_M = 900.0;
 const float CLOUD_TOP_M = 13500.0;
 const float CIRRUS_BASE_M = 6500.0;
@@ -204,15 +208,16 @@ vec3 repair_missing_ocean_source(vec3 local_direction, vec3 reference_rgb, float
     return mix(reference_rgb, replacement, missing_source);
 }
 
+float measured_elevation_local(vec3 local_direction) {
+    float encoded = texture(u_elevation, earth_uv_from_local(local_direction)).r;
+    return mix(MIN_ELEVATION_SOURCE_M, MAX_ELEVATION_SOURCE_M, encoded);
+}
+
 float wrapped_longitude_distance(float longitude, float center) {
     return mod(longitude - center + PI, TAU) - PI;
 }
 
-float terrain_height_local(vec3 local_direction) {
-    float land = land_mask(local_direction);
-    if (land < 0.01) {
-        return 0.0;
-    }
+float procedural_terrain_height_local(vec3 local_direction, float land) {
     float longitude = atan(local_direction.z, local_direction.x);
     float latitude = asin(clamp(local_direction.y, -1.0, 1.0));
     float rough = fbm(local_direction * 52.0 + vec3(4.0, -9.0, 2.0));
@@ -226,6 +231,17 @@ float terrain_height_local(vec3 local_direction) {
     float mountain_belt = max(andes * 0.82, max(himalaya, rockies * 0.62));
     float base_relief = pow(saturate((rough - 0.42) / 0.58), 2.2) * 2100.0;
     return land * min(MAX_TERRAIN_M, base_relief + mountain_belt * 6500.0);
+}
+
+float terrain_height_local(vec3 local_direction) {
+    float land = land_mask(local_direction);
+    if (land < 0.01) {
+        return 0.0;
+    }
+    if (u_elevation_ready > 0.5) {
+        return land * clamp(measured_elevation_local(local_direction), 0.0, MAX_TERRAIN_M);
+    }
+    return procedural_terrain_height_local(local_direction, land);
 }
 
 float terrain_height_world_direction(vec3 world_direction) {
