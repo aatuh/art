@@ -39,9 +39,8 @@ float first_positive_root(float near_root, float far_root) {
 }
 
 vec2 ray_sphere(vec3 direction, vec3 center, float radius) {
-    vec3 origin_to_center = -center;
-    float b = dot(origin_to_center, direction);
-    float c = dot(origin_to_center, origin_to_center) - radius * radius;
+    float b = dot(center, direction);
+    float c = dot(center, center) - radius * radius;
     float discriminant = b * b - c;
     if (discriminant < 0.0) {
         return vec2(-1.0);
