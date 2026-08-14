@@ -6,8 +6,12 @@ use crate::planet_tiles::TileAssetRequest;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SlotReservation {
-    Resident { slot: u16 },
-    Vacant { slot: u16 },
+    Resident {
+        slot: u16,
+    },
+    Vacant {
+        slot: u16,
+    },
     Evicted {
         slot: u16,
         previous: TileAssetRequest,
