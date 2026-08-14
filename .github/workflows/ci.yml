@@ -23,3 +23,9 @@ jobs:
         run: |
           rustup default 1.85.0
           make check
+      - name: Install GLSL validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes glslang-tools
+      - name: Validate planetary shaders
+        run: sh scripts/check_planet_shaders.sh
