@@ -51,7 +51,10 @@ mod tests {
     #[test]
     fn composed_shader_contains_one_terrain_shadow_function_and_use_site() {
         let shader = fragment_source().expect("stable planet shader markers");
-        assert_eq!(shader.matches("float terrain_shadow_visibility(").count(), 1);
+        assert_eq!(
+            shader.matches("float terrain_shadow_visibility(").count(),
+            1
+        );
         assert_eq!(shader.matches("* terrain_light;").count(), 1);
         assert!(shader.contains("u_camera_altitude_m > 750000.0"));
     }
