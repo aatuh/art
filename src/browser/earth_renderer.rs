@@ -15,12 +15,10 @@ use web_sys::{
 
 use crate::{
     camera_api::CameraState,
-    earth_coordinates::inertial_to_earth_fixed,
     planet::{
         CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M, EARTH_POLAR_RADIUS_M,
         MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M, Vec3d,
     },
-    planet_tiles::{TileId, surface_tile_level_for_altitude, surface_tile_streaming_plan},
     simulation_clock::SimulationClock,
     surface_lod::{SurfaceTier, select_surface_tier},
 };
@@ -53,7 +51,6 @@ pub(super) struct PlanetRenderer {
     orbital_surface_ready: Cell<bool>,
     regional_surface_ready: Cell<bool>,
     elevation_ready: Cell<bool>,
-    tile_center: Cell<Option<TileId>>,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -178,7 +175,6 @@ impl PlanetRenderer {
             orbital_surface_ready: Cell::new(false),
             regional_surface_ready: Cell::new(false),
             elevation_ready: Cell::new(false),
-            tile_center: Cell::new(None),
             uniforms,
             clock,
         })
@@ -235,7 +231,6 @@ impl PlanetRenderer {
         self.clock.set(clock);
 
         let celestial = CelestialFrame::at_seconds_since_j2000(seconds_since_j2000);
-        self.update_tile_plan_metadata(visitor, celestial, camera_altitude_m);
         let relative = celestial.relative_to(visitor.position_m);
         let basis = visitor.camera_basis();
 
@@ -290,49 +285,6 @@ impl PlanetRenderer {
             if self.elevation_ready.get() { 1.0 } else { 0.0 },
         );
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
-    }
-
-    fn update_tile_plan_metadata(
-        &self,
-        visitor: CameraState,
-        celestial: CelestialFrame,
-        camera_altitude_m: f64,
-    ) {
-        let fixed_direction = inertial_to_earth_fixed(
-            visitor.position_m,
-            celestial.earth_rotation_radians,
-        );
-        let level = surface_tile_level_for_altitude(camera_altitude_m);
-        let Some(center) = TileId::from_direction(fixed_direction, level) else {
-            return;
-        };
-        if self.tile_center.get() == Some(center) {
-            return;
-        }
-
-        let plan = surface_tile_streaming_plan(fixed_direction, camera_altitude_m, 1);
-        let _ = self
-            .canvas
-            .set_attribute("data-surface-tile-level", &plan.level.to_string());
-        let _ = self.canvas.set_attribute(
-            "data-surface-center-tile",
-            &format!(
-                "{}/{}/{}/{}",
-                center.face.slug(),
-                center.level,
-                center.x,
-                center.y
-            ),
-        );
-        let _ = self.canvas.set_attribute(
-            "data-surface-primary-tiles",
-            &plan.primary.len().to_string(),
-        );
-        let _ = self.canvas.set_attribute(
-            "data-surface-fallback-tiles",
-            &plan.fallback.len().to_string(),
-        );
-        self.tile_center.set(Some(center));
     }
 
     fn try_upload_orbital_surface(&self) {
