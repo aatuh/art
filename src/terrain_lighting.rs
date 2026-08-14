@@ -13,8 +13,7 @@ pub const TERRAIN_SHADOW_SAMPLE_DISTANCES_M: [f64; 6] =
 /// Whether terrain-shadow sampling should run for the current fragment/camera state.
 pub fn terrain_shadow_enabled(camera_altitude_m: f64, land_fraction: f64) -> bool {
     camera_altitude_m.is_finite()
-        && camera_altitude_m >= 0.0
-        && camera_altitude_m <= TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M
+        && (0.0..=TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M).contains(&camera_altitude_m)
         && land_fraction.is_finite()
         && land_fraction > 0.02
 }

@@ -1,12 +1,7 @@
-#[path = "../src/planet.rs"]
-mod planet;
-#[path = "../src/planet_tiles.rs"]
-mod planet_tiles;
-#[path = "../src/tile_cache.rs"]
-mod tile_cache;
-
-use planet_tiles::{CubeFace, TileAssetRequest, TileId, TileLayer};
-use tile_cache::{ResidentTileCache, SlotReservation};
+use black_cube_gallery::{
+    planet_tiles::{CubeFace, TileAssetRequest, TileId, TileLayer},
+    tile_cache::{ResidentTileCache, SlotReservation},
+};
 
 fn request(x: u32) -> TileAssetRequest {
     TileAssetRequest {

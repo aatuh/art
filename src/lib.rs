@@ -12,6 +12,8 @@ pub mod planet;
 pub mod planet_tiles;
 pub mod simulation_clock;
 pub mod surface_lod;
+pub mod terrain_lighting;
+pub mod tile_cache;
 pub mod tile_streaming;
 
 pub use artwork::{Artwork, ArtworkKind, Destination, is_valid_artwork_id};
