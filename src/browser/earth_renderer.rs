@@ -151,10 +151,10 @@ impl PlanetRenderer {
         let mut state = self.clock.get();
         let scale = state.cycle_scale();
         self.clock.set(state);
-        if let Some(installation) = self.canvas.parent_element()
-            && let Ok(Some(button)) = installation.query_selector(".time-scale-button")
-        {
-            let _ = update_time_button(&button, scale);
+        if let Some(installation) = self.canvas.parent_element() {
+            if let Ok(Some(button)) = installation.query_selector(".time-scale-button") {
+                let _ = update_time_button(&button, scale);
+            }
         }
     }
 
