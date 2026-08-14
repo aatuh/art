@@ -28,6 +28,7 @@ use super::dom::window;
 const UNIX_SECONDS_AT_J2000: f64 = 946_728_000.0;
 const MAX_DEVICE_PIXEL_RATIO: f64 = 2.0;
 const EARTH_SURFACE_512_WEBP_B64: &str = include_str!("earth_surface_512.webp.b64");
+const EARTH_ELEVATION_512_PNG_B64: &str = include_str!("earth_elevation_512.png.b64");
 
 pub(super) struct PlanetRenderer {
     canvas: HtmlCanvasElement,
@@ -38,9 +39,13 @@ pub(super) struct PlanetRenderer {
     global_surface_texture: WebGlTexture,
     orbital_surface_texture: WebGlTexture,
     land_mask_texture: WebGlTexture,
+    elevation_texture: WebGlTexture,
     surface_image: HtmlImageElement,
+    elevation_image: HtmlImageElement,
     surface_image_upload_attempted: Cell<bool>,
+    elevation_image_upload_attempted: Cell<bool>,
     orbital_surface_ready: Cell<bool>,
+    elevation_ready: Cell<bool>,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -63,6 +68,8 @@ struct Uniforms {
     time: WebGlUniformLocation,
     surface: WebGlUniformLocation,
     land_mask: WebGlUniformLocation,
+    elevation: WebGlUniformLocation,
+    elevation_ready: WebGlUniformLocation,
 }
 
 impl PlanetRenderer {
@@ -101,7 +108,9 @@ impl PlanetRenderer {
         let global_surface_texture = texture::create(&gl)?;
         let orbital_surface_texture = texture::create(&gl)?;
         let land_mask_texture = texture::create(&gl)?;
-        let surface_image = create_surface_image()?;
+        let elevation_texture = texture::create(&gl)?;
+        let surface_image = create_data_image("image/webp", EARTH_SURFACE_512_WEBP_B64)?;
+        let elevation_image = create_data_image("image/png", EARTH_ELEVATION_512_PNG_B64)?;
         let uniforms = Uniforms {
             resolution: required_uniform(&gl, &program, "u_resolution")?,
             camera_forward: required_uniform(&gl, &program, "u_camera_forward")?,
@@ -124,9 +133,12 @@ impl PlanetRenderer {
             time: required_uniform(&gl, &program, "u_time")?,
             surface: required_uniform(&gl, &program, "u_surface")?,
             land_mask: required_uniform(&gl, &program, "u_land_mask")?,
+            elevation: required_uniform(&gl, &program, "u_elevation")?,
+            elevation_ready: required_uniform(&gl, &program, "u_elevation_ready")?,
         };
         gl.uniform1i(Some(&uniforms.surface), 0);
         gl.uniform1i(Some(&uniforms.land_mask), 1);
+        gl.uniform1i(Some(&uniforms.elevation), 2);
 
         gl.disable(Gl::DEPTH_TEST);
         gl.disable(Gl::BLEND);
@@ -145,9 +157,13 @@ impl PlanetRenderer {
             global_surface_texture,
             orbital_surface_texture,
             land_mask_texture,
+            elevation_texture,
             surface_image,
+            elevation_image,
             surface_image_upload_attempted: Cell::new(false),
+            elevation_image_upload_attempted: Cell::new(false),
             orbital_surface_ready: Cell::new(false),
+            elevation_ready: Cell::new(false),
             uniforms,
             clock,
         })
@@ -170,6 +186,7 @@ impl PlanetRenderer {
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
         self.try_upload_orbital_surface();
+        self.try_upload_elevation();
         let (width, height) = resize_canvas(&self.canvas);
         self.gl.viewport(0, 0, width as i32, height as i32);
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
@@ -187,6 +204,9 @@ impl PlanetRenderer {
         self.gl.active_texture(Gl::TEXTURE1);
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.land_mask_texture));
+        self.gl.active_texture(Gl::TEXTURE2);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.elevation_texture));
 
         let mut clock = self.clock.get();
         let seconds_since_j2000 = clock.advance(now);
@@ -243,6 +263,10 @@ impl PlanetRenderer {
         );
         self.gl
             .uniform1f(Some(&self.uniforms.time), animation_seconds as f32);
+        self.gl.uniform1f(
+            Some(&self.uniforms.elevation_ready),
+            if self.elevation_ready.get() { 1.0 } else { 0.0 },
+        );
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
     }
 
@@ -257,31 +281,49 @@ impl PlanetRenderer {
         self.gl.active_texture(Gl::TEXTURE0);
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.orbital_surface_texture));
-        match self
-            .gl
-            .tex_image_2d_with_u32_and_u32_and_html_image_element(
-                Gl::TEXTURE_2D,
-                0,
-                Gl::RGBA as i32,
-                Gl::RGBA,
-                Gl::UNSIGNED_BYTE,
-                &self.surface_image,
-            ) {
-            Ok(()) => {
-                self.gl.generate_mipmap(Gl::TEXTURE_2D);
-                self.orbital_surface_ready.set(true);
-            }
+        match upload_image_to_bound_texture(&self.gl, &self.surface_image) {
+            Ok(()) => self.orbital_surface_ready.set(true),
+            Err(error) => web_sys::console::warn_1(&error),
+        }
+    }
+
+    fn try_upload_elevation(&self) {
+        if self.elevation_image_upload_attempted.get()
+            || !self.elevation_image.complete()
+            || self.elevation_image.natural_width() == 0
+        {
+            return;
+        }
+        self.elevation_image_upload_attempted.set(true);
+        if self.elevation_image.natural_width() <= 1 || self.elevation_image.natural_height() <= 1 {
+            return;
+        }
+        self.gl.active_texture(Gl::TEXTURE2);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.elevation_texture));
+        match upload_image_to_bound_texture(&self.gl, &self.elevation_image) {
+            Ok(()) => self.elevation_ready.set(true),
             Err(error) => web_sys::console::warn_1(&error),
         }
     }
 }
 
-fn create_surface_image() -> Result<HtmlImageElement, JsValue> {
+fn upload_image_to_bound_texture(gl: &Gl, image: &HtmlImageElement) -> Result<(), JsValue> {
+    gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
+        Gl::TEXTURE_2D,
+        0,
+        Gl::RGBA as i32,
+        Gl::RGBA,
+        Gl::UNSIGNED_BYTE,
+        image,
+    )?;
+    gl.generate_mipmap(Gl::TEXTURE_2D);
+    Ok(())
+}
+
+fn create_data_image(media_type: &str, encoded: &str) -> Result<HtmlImageElement, JsValue> {
     let image = HtmlImageElement::new()?;
-    image.set_src(&format!(
-        "data:image/webp;base64,{}",
-        EARTH_SURFACE_512_WEBP_B64.trim()
-    ));
+    image.set_src(&format!("data:{media_type};base64,{}", encoded.trim()));
     Ok(image)
 }
 
@@ -397,7 +439,7 @@ fn link_program(
 ) -> Result<WebGlProgram, JsValue> {
     let program = gl
         .create_program()
-        .ok_or_else(|| JsValue::from_str("Could not create the planetary shader program."))?;
+        .ok_or_else(|| JsValue::from_str("Could not create a planetary shader program."))?;
     gl.attach_shader(&program, vertex);
     gl.attach_shader(&program, fragment);
     gl.link_program(&program);
