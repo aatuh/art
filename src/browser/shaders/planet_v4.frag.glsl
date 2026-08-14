@@ -26,8 +26,10 @@ const float PI = 3.141592653589793;
 const float TAU = 6.283185307179586;
 const float INF = 1.0e30;
 const float MAX_TERRAIN_M = 8500.0;
-const float CLOUD_BASE_M = 1500.0;
-const float CLOUD_TOP_M = 12000.0;
+const float CLOUD_BASE_M = 900.0;
+const float CLOUD_TOP_M = 13500.0;
+const float CIRRUS_BASE_M = 6500.0;
+const float CIRRUS_TOP_M = 15000.0;
 const float RAYLEIGH_SCALE_HEIGHT_M = 8000.0;
 const float MIE_SCALE_HEIGHT_M = 1200.0;
 const vec3 BETA_R = vec3(5.802e-6, 13.558e-6, 33.100e-6);
@@ -406,37 +408,75 @@ void integrate_atmosphere(
     transmission = exp(-atmosphere_extinction(view_depth));
 }
 
-float cloud_vertical_profile(float altitude_m) {
-    float base = smoothstep(CLOUD_BASE_M, CLOUD_BASE_M + 1800.0, altitude_m);
-    float top = 1.0 - smoothstep(CLOUD_TOP_M - 3500.0, CLOUD_TOP_M, altitude_m);
+float lower_cloud_vertical_profile(float altitude_m, float cloud_top_m) {
+    float base = smoothstep(CLOUD_BASE_M, CLOUD_BASE_M + 1500.0, altitude_m);
+    float top_start = max(cloud_top_m - 2800.0, CLOUD_BASE_M + 1800.0);
+    float top = 1.0 - smoothstep(top_start, cloud_top_m, altitude_m);
+    return base * top;
+}
+
+float cirrus_vertical_profile(float altitude_m) {
+    float base = smoothstep(CIRRUS_BASE_M, CIRRUS_BASE_M + 1600.0, altitude_m);
+    float top = 1.0 - smoothstep(CIRRUS_TOP_M - 2500.0, CIRRUS_TOP_M, altitude_m);
     return base * top;
 }
 
 float cloud_density(vec3 point) {
     float altitude = altitude_above_ellipsoid(point);
-    float vertical = cloud_vertical_profile(altitude);
-    if (vertical <= 0.0) {
+    if (altitude < CLOUD_BASE_M || altitude > CIRRUS_TOP_M) {
         return 0.0;
     }
 
     vec3 local = earth_fixed_direction(point);
-    float weather_time = u_time * 0.018;
-    vec3 wind_direction = rotate_y(local, u_time * 0.00010);
-    float macro = fbm(wind_direction * 4.2 + vec3(weather_time * 0.07, -weather_time * 0.03, weather_time * 0.05));
-    float weather = fbm(wind_direction * 1.55 + vec3(-weather_time * 0.018, 7.0, weather_time * 0.012));
-    float detail = noise3(wind_direction * 34.0 + vec3(weather_time * 0.31, altitude * 0.00055, -weather_time * 0.24));
-    float threshold = mix(0.66, 0.53, weather);
-    float body = smoothstep(threshold, threshold + 0.17, macro + detail * 0.16);
-    return body * vertical;
+    float weather_time = u_time * 0.014;
+    vec3 lower_wind = rotate_y(local, u_time * 0.00010);
+    vec3 upper_wind = rotate_y(local, u_time * 0.00028 + local.y * 0.055);
+
+    float synoptic = fbm(
+        lower_wind * 1.45
+            + vec3(-weather_time * 0.018, 7.0, weather_time * 0.012)
+    );
+    float convection = fbm(
+        lower_wind * 4.6
+            + vec3(weather_time * 0.075, -weather_time * 0.025, weather_time * 0.052)
+    );
+    float growth = smoothstep(0.46, 0.82, synoptic * 0.58 + convection * 0.42);
+    float variable_top = mix(4500.0, CLOUD_TOP_M, growth);
+    float lower_detail = noise3(
+        lower_wind * 36.0
+            + vec3(weather_time * 0.33, altitude * 0.00062, -weather_time * 0.24)
+    );
+    float lower_threshold = mix(0.72, 0.52, synoptic);
+    float lower_field = convection + lower_detail * 0.17 + synoptic * 0.12;
+    float lower_clouds = smoothstep(
+        lower_threshold,
+        lower_threshold + 0.16,
+        lower_field
+    ) * lower_cloud_vertical_profile(altitude, variable_top);
+
+    float cirrus_synoptic = fbm(
+        upper_wind * 2.25
+            + vec3(weather_time * 0.035, -3.0, -weather_time * 0.028)
+    );
+    float cirrus_filaments = fbm(
+        upper_wind * 13.0
+            + vec3(-weather_time * 0.19, altitude * 0.00018, weather_time * 0.14)
+    );
+    float cirrus_field = cirrus_synoptic * 0.62 + cirrus_filaments * 0.38;
+    float cirrus = smoothstep(0.58, 0.76, cirrus_field)
+        * cirrus_vertical_profile(altitude)
+        * mix(0.18, 0.46, synoptic);
+
+    return saturate(lower_clouds + cirrus);
 }
 
 float cloud_light_transmission(vec3 point, vec3 light_direction) {
     float optical = 0.0;
-    for (int step_index = 0; step_index < 3; ++step_index) {
-        float distance_along_light = (float(step_index) + 1.0) * 3500.0;
+    for (int step_index = 0; step_index < 4; ++step_index) {
+        float distance_along_light = (float(step_index) + 1.0) * 3600.0;
         optical += cloud_density(point + light_direction * distance_along_light);
     }
-    return exp(-optical * 0.85);
+    return exp(-optical * 0.72);
 }
 
 void integrate_clouds(
@@ -452,7 +492,7 @@ void integrate_clouds(
         vec3(0.0),
         ray_direction,
         u_earth_center_m,
-        u_earth_equatorial_radius_m + CLOUD_TOP_M
+        u_earth_equatorial_radius_m + CIRRUS_TOP_M
     );
     if (cloud_hit.y <= 0.0) {
         return;
@@ -474,9 +514,12 @@ void integrate_clouds(
         }
         vec3 light_direction = normalize(u_sun_center_m - point);
         float light_visibility = cloud_light_transmission(point, light_direction);
-        float forward_scatter = 0.35 + 0.65 * pow(max(dot(ray_direction, light_direction), 0.0), 8.0);
-        vec3 ambient = vec3(0.18, 0.22, 0.28);
-        vec3 sunlit = vec3(1.0, 0.97, 0.91) * (0.55 + forward_scatter * 0.85);
+        float view_light = dot(ray_direction, light_direction);
+        float forward_scatter = 0.30 + 0.70 * pow(max(view_light, 0.0), 10.0);
+        float silver_lining = pow(max(view_light, 0.0), 24.0) * 0.75;
+        vec3 ambient = vec3(0.17, 0.21, 0.27);
+        vec3 sunlit = vec3(1.0, 0.97, 0.91)
+            * (0.52 + forward_scatter * 0.82 + silver_lining);
         vec3 sample_color = mix(ambient, sunlit, light_visibility);
         float optical = density * step_length / 6500.0;
         float alpha = 1.0 - exp(-optical);
@@ -491,10 +534,10 @@ void integrate_clouds(
 float cloud_shadow(vec3 surface_point, vec3 light_direction) {
     float optical = 0.0;
     for (int sample_index = 0; sample_index < 4; ++sample_index) {
-        float distance_along_light = 2500.0 + float(sample_index) * 3000.0;
+        float distance_along_light = 2500.0 + float(sample_index) * 3600.0;
         optical += cloud_density(surface_point + light_direction * distance_along_light);
     }
-    return exp(-optical * 0.52);
+    return exp(-optical * 0.50);
 }
 
 float solar_visibility(vec3 point, vec3 blocker_center, float blocker_radius) {
