@@ -74,21 +74,94 @@ vec3 rotate_y(vec3 value, float angle) {
     );
 }
 
-vec2 earth_uv(vec3 world_direction) {
-    vec3 local = normalize(rotate_y(world_direction, -u_earth_rotation));
-    float longitude = atan(local.z, local.x);
-    float latitude = asin(clamp(local.y, -1.0, 1.0));
+vec2 spherical_uv(vec3 direction) {
+    vec3 normalized_direction = normalize(direction);
+    float longitude = atan(normalized_direction.z, normalized_direction.x);
+    float latitude = asin(clamp(normalized_direction.y, -1.0, 1.0));
     return vec2(fract(longitude / TAU + 0.5), 0.5 - latitude / PI);
 }
 
-float cheap_clouds(vec2 uv) {
-    float longitude = uv.x * TAU;
-    float latitude = (0.5 - uv.y) * PI;
-    float drift = u_time * 0.000055;
-    float broad = sin(longitude * 5.0 + drift + sin(latitude * 3.0) * 1.7);
-    float detail = sin(longitude * 13.0 - drift * 1.6 + latitude * 8.0);
-    float belts = cos(latitude * 4.0) * 0.18;
-    return smoothstep(0.60, 0.92, broad * 0.28 + detail * 0.15 + belts + 0.56);
+vec2 earth_uv(vec3 world_direction) {
+    return spherical_uv(rotate_y(world_direction, -u_earth_rotation));
+}
+
+float hash21(vec2 value) {
+    vec3 p = fract(vec3(value.xyx) * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float hash31(vec3 value) {
+    vec3 p = fract(value * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float value_noise(vec3 value) {
+    vec3 cell = floor(value);
+    vec3 blend = fract(value);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+
+    float n000 = hash31(cell + vec3(0.0, 0.0, 0.0));
+    float n100 = hash31(cell + vec3(1.0, 0.0, 0.0));
+    float n010 = hash31(cell + vec3(0.0, 1.0, 0.0));
+    float n110 = hash31(cell + vec3(1.0, 1.0, 0.0));
+    float n001 = hash31(cell + vec3(0.0, 0.0, 1.0));
+    float n101 = hash31(cell + vec3(1.0, 0.0, 1.0));
+    float n011 = hash31(cell + vec3(0.0, 1.0, 1.0));
+    float n111 = hash31(cell + vec3(1.0, 1.0, 1.0));
+
+    float lower = mix(
+        mix(n000, n100, blend.x),
+        mix(n010, n110, blend.x),
+        blend.y
+    );
+    float upper = mix(
+        mix(n001, n101, blend.x),
+        mix(n011, n111, blend.x),
+        blend.y
+    );
+    return mix(lower, upper, blend.z);
+}
+
+float star_layer(vec2 uv, vec2 grid_size, float threshold, float radius, float salt) {
+    vec2 grid = uv * grid_size;
+    vec2 cell = floor(grid);
+    vec2 local = fract(grid) - 0.5;
+    float seed = hash21(cell + salt);
+    vec2 offset = vec2(
+        hash21(cell + vec2(17.1 + salt, 3.7)),
+        hash21(cell + vec2(5.9, 29.3 + salt))
+    ) - 0.5;
+    float distance_to_star = length(local - offset * 0.62);
+    float star = (1.0 - smoothstep(0.0, radius, distance_to_star))
+        * smoothstep(threshold, 1.0, seed);
+    float brightness = mix(0.35, 1.0, pow(hash21(cell + 71.0 + salt), 3.0));
+    return star * brightness;
+}
+
+vec3 starfield(vec3 direction) {
+    vec2 uv = spherical_uv(direction);
+    float stars = star_layer(uv, vec2(760.0, 380.0), 0.982, 0.085, 0.0);
+    stars += star_layer(uv, vec2(1450.0, 725.0), 0.994, 0.070, 41.0) * 0.72;
+    float temperature = hash21(floor(uv * vec2(760.0, 380.0)) + 113.0);
+    vec3 tint = mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.88, 0.68), temperature);
+    return tint * stars;
+}
+
+float cloud_density_cheap(vec3 earth_fixed_direction) {
+    vec3 moving = rotate_y(normalize(earth_fixed_direction), u_time * 0.000045);
+    float broad = value_noise(moving * 3.1 + vec3(4.7, -2.2, 8.1));
+    float mesoscale = value_noise(
+        moving * 7.3 + vec3(-11.0, 5.0, 3.0) + vec3(u_time * 0.00008, 0.0, 0.0)
+    );
+    float detail = value_noise(
+        moving * 16.0 + vec3(2.0, 9.0, -7.0) + vec3(0.0, 0.0, -u_time * 0.00012)
+    );
+    float field = broad * 0.62 + mesoscale * 0.28 + detail * 0.10;
+    float latitude = abs(earth_fixed_direction.y);
+    float polar_breakup = mix(1.0, 0.80, smoothstep(0.70, 0.96, latitude));
+    return smoothstep(0.56, 0.70, field) * polar_breakup;
 }
 
 vec3 shade_earth(vec3 direction, float distance_to_surface) {
@@ -100,26 +173,38 @@ vec3 shade_earth(vec3 direction, float distance_to_surface) {
     vec3 point = direction * distance_to_surface;
     vec3 local_point = point - u_earth_center_m;
     vec3 normal = normalize(local_point / (radii * radii));
-    vec2 uv = earth_uv(local_point);
+    vec3 earth_fixed = normalize(rotate_y(local_point, -u_earth_rotation));
+    vec2 uv = spherical_uv(earth_fixed);
 
-    vec3 albedo = pow(max(texture(u_surface, uv).rgb, vec3(0.002)), vec3(2.2));
+    vec3 reference = texture(u_surface, uv).rgb;
     float land = texture(u_land_mask, uv).a;
     float elevation = texture(u_elevation, uv).r;
-    albedo *= 1.0 + u_elevation_ready * (elevation - 0.5) * 0.035 * land;
+    reference *= 1.0 + u_elevation_ready * (elevation - 0.5) * 0.025 * land;
 
     vec3 light_direction = normalize(u_sun_center_m - point);
-    float diffuse = max(dot(normal, light_direction), 0.0);
-    float night = smoothstep(0.04, -0.14, dot(normal, light_direction));
-    vec3 color = albedo * (0.055 + 0.945 * diffuse);
-    color += albedo * vec3(0.035, 0.055, 0.09) * night;
+    float n_dot_l = dot(normal, light_direction);
+    float diffuse = max(n_dot_l, 0.0);
+    float daylight = pow(diffuse, 0.58);
+    vec3 color = reference * mix(0.022, 1.02, daylight);
 
-    float cloud = cheap_clouds(uv);
-    vec3 cloud_color = mix(vec3(0.30, 0.34, 0.39), vec3(1.0, 0.98, 0.94), 0.35 + 0.65 * diffuse);
-    color = mix(color, cloud_color, cloud * (0.18 + 0.36 * diffuse));
+    float ocean = 1.0 - land;
+    vec3 half_vector = normalize(light_direction - direction);
+    float ocean_specular = pow(max(dot(normal, half_vector), 0.0), 96.0)
+        * ocean
+        * smoothstep(0.02, 0.30, diffuse);
+    color += vec3(1.0, 0.90, 0.72) * ocean_specular * 0.62;
 
-    float rim = pow(1.0 - max(dot(normal, -direction), 0.0), 3.2);
-    float altitude_factor = mix(1.0, 0.72, clamp(u_camera_altitude_m / 4.0e7, 0.0, 1.0));
-    color += vec3(0.08, 0.32, 0.75) * rim * 0.48 * altitude_factor;
+    float cloud = cloud_density_cheap(earth_fixed);
+    float cloud_daylight = mix(0.10, 1.0, pow(diffuse, 0.42));
+    vec3 cloud_color = vec3(0.92, 0.95, 0.98) * cloud_daylight;
+    float cloud_alpha = cloud * mix(0.18, 0.55, daylight);
+    color = mix(color, cloud_color, cloud_alpha);
+
+    float view_facing = max(dot(normal, -direction), 0.0);
+    float rim = pow(1.0 - view_facing, 4.0);
+    float sunward_rim = mix(0.22, 1.0, smoothstep(-0.15, 0.35, n_dot_l));
+    float altitude_factor = mix(1.0, 0.65, clamp(u_camera_altitude_m / 4.0e7, 0.0, 1.0));
+    color += vec3(0.08, 0.30, 0.70) * rim * sunward_rim * 0.30 * altitude_factor;
     return color;
 }
 
@@ -128,12 +213,13 @@ vec3 shade_moon(vec3 direction, float distance_to_surface) {
     vec3 normal = normalize(point - u_moon_center_m);
     vec3 light_direction = normalize(u_sun_center_m - point);
     float diffuse = max(dot(normal, light_direction), 0.0);
-    float mottling = 0.90 + 0.10 * sin(normal.x * 37.0 + normal.z * 29.0) * sin(normal.y * 31.0);
-    return vec3(0.42, 0.41, 0.39) * mottling * (0.025 + 0.975 * diffuse);
+    float mottling = 0.90 + 0.10 * sin(normal.x * 37.0 + normal.z * 29.0)
+        * sin(normal.y * 31.0);
+    return vec3(0.47, 0.46, 0.43) * mottling * (0.018 + 0.982 * diffuse);
 }
 
 vec3 background(vec3 direction) {
-    vec3 color = vec3(0.0008, 0.0012, 0.0025);
+    vec3 color = starfield(direction);
     vec2 atmosphere_hit = ray_sphere(
         direction,
         u_earth_center_m,
@@ -149,7 +235,7 @@ vec3 background(vec3 direction) {
                 u_earth_equatorial_radius_m + u_atmosphere_top_m,
                 radial_distance
             );
-            color += vec3(0.05, 0.22, 0.62) * shell * shell * 0.44;
+            color += vec3(0.035, 0.16, 0.48) * shell * shell * 0.34;
         }
     }
     return color;
@@ -188,10 +274,8 @@ void main() {
     vec2 sun_roots = ray_sphere(direction, u_sun_center_m, u_sun_radius_m);
     float sun_distance = first_positive_root(sun_roots.x, sun_roots.y);
     if (sun_distance < nearest) {
-        color = vec3(7.5, 6.6, 5.2);
+        color = vec3(1.0, 0.95, 0.80);
     }
 
-    color = color / (vec3(1.0) + color);
-    color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
-    out_color = vec4(color, 1.0);
+    out_color = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
