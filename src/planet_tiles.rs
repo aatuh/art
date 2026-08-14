@@ -29,6 +29,17 @@ impl CubeFace {
         Self::NegativeZ,
     ];
 
+    pub const fn slug(self) -> &'static str {
+        match self {
+            Self::PositiveX => "px",
+            Self::NegativeX => "nx",
+            Self::PositiveY => "py",
+            Self::NegativeY => "ny",
+            Self::PositiveZ => "pz",
+            Self::NegativeZ => "nz",
+        }
+    }
+
     /// Maps face-local coordinates in [-1, 1]² onto a normalized cube-sphere direction.
     pub fn direction(self, u: f64, v: f64) -> Vec3d {
         self.direction_unbounded(u.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0))
@@ -170,6 +181,68 @@ impl TileId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TileLayer {
+    Surface,
+    Elevation,
+}
+
+impl TileLayer {
+    pub const fn slug(self) -> &'static str {
+        match self {
+            Self::Surface => "surface",
+            Self::Elevation => "elevation",
+        }
+    }
+
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Surface => "webp",
+            Self::Elevation => "png",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TileAssetRequest {
+    pub layer: TileLayer,
+    pub tile: TileId,
+}
+
+impl TileAssetRequest {
+    pub fn path(self) -> String {
+        format!(
+            "./assets/earth/tiles/{}/{}/{}/{}/{}.{}",
+            self.layer.slug(),
+            self.tile.face.slug(),
+            self.tile.level,
+            self.tile.x,
+            self.tile.y,
+            self.layer.extension()
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TileStreamingPlan {
+    pub level: u8,
+    pub primary: Vec<TileId>,
+    pub fallback: Vec<TileId>,
+}
+
+impl TileStreamingPlan {
+    /// Produces coarse-to-fine requests so existing parent coverage can render while
+    /// fine tiles are still decoding.
+    pub fn requests(&self, layer: TileLayer) -> Vec<TileAssetRequest> {
+        self.fallback
+            .iter()
+            .chain(self.primary.iter())
+            .copied()
+            .map(|tile| TileAssetRequest { layer, tile })
+            .collect()
+    }
+}
+
 /// Approximate surface edge length represented by one cube-face tile.
 pub fn tile_edge_m(level: u8) -> f64 {
     let level = level.min(MAX_STREAMING_LEVEL);
@@ -216,13 +289,39 @@ pub fn surface_tile_working_set(
     tiles.into_iter().collect()
 }
 
+/// Builds the fine working set plus every unique parent tile needed as coarse fallback.
+pub fn surface_tile_streaming_plan(
+    surface_direction: Vec3d,
+    altitude_m: f64,
+    radius_tiles: u8,
+) -> TileStreamingPlan {
+    let primary = surface_tile_working_set(surface_direction, altitude_m, radius_tiles);
+    let level = primary.first().map_or(0, |tile| tile.level);
+    let mut fallback_set = BTreeSet::new();
+    for tile in &primary {
+        let mut ancestor = *tile;
+        while let Some(parent) = ancestor.parent() {
+            fallback_set.insert(parent);
+            ancestor = parent;
+        }
+    }
+    let mut fallback = fallback_set.into_iter().collect::<Vec<_>>();
+    fallback.sort_by_key(|tile| (tile.level, tile.face, tile.x, tile.y));
+    TileStreamingPlan {
+        level,
+        primary,
+        fallback,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        CubeFace, MAX_STREAMING_LEVEL, TileId, face_uv, surface_tile_level_for_altitude,
-        surface_tile_working_set, tile_edge_m,
+        CubeFace, MAX_STREAMING_LEVEL, TileAssetRequest, TileId, TileLayer, face_uv,
+        surface_tile_level_for_altitude, surface_tile_streaming_plan, surface_tile_working_set,
+        tile_edge_m,
     };
     use crate::planet::Vec3d;
 
@@ -325,5 +424,57 @@ mod tests {
         let direction = CubeFace::PositiveZ.direction(0.0, 0.0);
         let bounded = surface_tile_working_set(direction, 400_000.0, 255);
         assert!(bounded.len() <= 81);
+    }
+
+    #[test]
+    fn streaming_plan_adds_unique_coarse_parent_coverage() {
+        let direction = CubeFace::PositiveZ.direction(0.2, -0.1);
+        let plan = surface_tile_streaming_plan(direction, 400_000.0, 1);
+        assert_eq!(plan.primary.len(), 9);
+        assert!(plan.level > 0);
+        assert!(plan.fallback.iter().all(|tile| tile.level < plan.level));
+        assert_eq!(
+            plan.fallback.iter().copied().collect::<BTreeSet<_>>().len(),
+            plan.fallback.len()
+        );
+        assert!(plan.fallback.windows(2).all(|pair| pair[0].level <= pair[1].level));
+    }
+
+    #[test]
+    fn tile_asset_paths_are_stable_and_layer_specific() {
+        let tile = TileId::new(CubeFace::PositiveZ, 6, 17, 42).expect("valid tile");
+        assert_eq!(
+            TileAssetRequest {
+                layer: TileLayer::Surface,
+                tile,
+            }
+            .path(),
+            "./assets/earth/tiles/surface/pz/6/17/42.webp"
+        );
+        assert_eq!(
+            TileAssetRequest {
+                layer: TileLayer::Elevation,
+                tile,
+            }
+            .path(),
+            "./assets/earth/tiles/elevation/pz/6/17/42.png"
+        );
+    }
+
+    #[test]
+    fn request_plan_orders_fallback_before_primary_tiles() {
+        let direction = CubeFace::PositiveZ.direction(0.0, 0.0);
+        let plan = surface_tile_streaming_plan(direction, 400_000.0, 0);
+        let requests = plan.requests(TileLayer::Surface);
+        let first_primary = requests
+            .iter()
+            .position(|request| request.tile.level == plan.level)
+            .expect("primary request");
+        assert!(requests[..first_primary]
+            .iter()
+            .all(|request| request.tile.level < plan.level));
+        assert!(requests[first_primary..]
+            .iter()
+            .all(|request| request.tile.level == plan.level));
     }
 }
