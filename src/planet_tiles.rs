@@ -173,10 +173,8 @@ impl TileId {
     pub fn offset(self, x_steps: i32, y_steps: i32) -> Option<Self> {
         let side = f64::from(1_u32 << self.level);
         let tile_span = 2.0 / side;
-        let u = ((f64::from(self.x) + 0.5) / side) * 2.0 - 1.0
-            + f64::from(x_steps) * tile_span;
-        let v = ((f64::from(self.y) + 0.5) / side) * 2.0 - 1.0
-            + f64::from(y_steps) * tile_span;
+        let u = ((f64::from(self.x) + 0.5) / side) * 2.0 - 1.0 + f64::from(x_steps) * tile_span;
+        let v = ((f64::from(self.y) + 0.5) / side) * 2.0 - 1.0 + f64::from(y_steps) * tile_span;
         Self::from_direction(self.face.direction_unbounded(u, v), self.level)
     }
 }
@@ -437,7 +435,10 @@ mod tests {
             plan.fallback.iter().copied().collect::<BTreeSet<_>>().len(),
             plan.fallback.len()
         );
-        assert!(plan.fallback.windows(2).all(|pair| pair[0].level <= pair[1].level));
+        assert!(plan
+            .fallback
+            .windows(2)
+            .all(|pair| pair[0].level <= pair[1].level));
     }
 
     #[test]
