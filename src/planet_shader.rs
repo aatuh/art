@@ -146,7 +146,9 @@ mod tests {
     fn startup_shader_stays_performance_safe() {
         let shader = fragment_source().expect("static orbital shader");
         assert!(shader.contains("vec3 shade_earth("));
-        assert!(shader.contains("float cheap_clouds("));
+        assert!(shader.contains("float cloud_density_cheap("));
+        assert!(shader.contains("vec3 sharpen_regional_surface("));
+        assert!(shader.contains("earth_distance <= moon_distance"));
         assert!(!shader.contains("integrate_clouds("));
         assert!(!shader.contains("integrate_atmosphere("));
         assert!(!shader.contains("intersect_terrain("));
