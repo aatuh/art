@@ -162,7 +162,20 @@ vec2 earth_uv_from_local(vec3 local_direction) {
 }
 
 vec4 earth_reference(vec3 local_direction) {
-    return texture(u_surface, earth_uv_from_local(local_direction));
+    vec2 uv = earth_uv_from_local(local_direction);
+    ivec2 dimensions = textureSize(u_surface, 0);
+    vec2 texel = 1.0 / max(vec2(dimensions), vec2(1.0));
+    vec4 center = texture(u_surface, uv);
+    vec3 blur = (
+        texture(u_surface, uv + vec2(texel.x, 0.0)).rgb
+        + texture(u_surface, uv - vec2(texel.x, 0.0)).rgb
+        + texture(u_surface, uv + vec2(0.0, texel.y)).rgb
+        + texture(u_surface, uv - vec2(0.0, texel.y)).rgb
+    ) * 0.25;
+    float source_resolution = smoothstep(128.0, 512.0, float(dimensions.x));
+    float sharpening = mix(0.08, 0.38, source_resolution);
+    vec3 sharpened = clamp(center.rgb + (center.rgb - blur) * sharpening, 0.0, 1.0);
+    return vec4(sharpened, center.a);
 }
 
 float land_reference(vec3 local_direction) {
@@ -174,6 +187,19 @@ float land_mask(vec3 local_direction) {
     float edge = 1.0 - abs(reference * 2.0 - 1.0);
     float breakup = (fbm(local_direction * 90.0 + vec3(3.0, 7.0, -4.0)) - 0.5) * 0.16 * edge;
     return smoothstep(0.32, 0.68, reference + breakup);
+}
+
+vec3 repair_missing_ocean_source(vec3 local_direction, vec3 reference_rgb, float land) {
+    float luminance = dot(reference_rgb, vec3(0.2126, 0.7152, 0.0722));
+    float southern_ocean = smoothstep(0.78, 0.90, -local_direction.y) * (1.0 - land);
+    float missing_source = southern_ocean * (1.0 - smoothstep(0.012, 0.034, luminance));
+    float variation = mix(
+        0.82,
+        1.16,
+        fbm(local_direction * 18.0 + vec3(9.0, -2.0, 5.0))
+    );
+    vec3 replacement = vec3(0.020, 0.060, 0.125) * variation;
+    return mix(reference_rgb, replacement, missing_source);
 }
 
 float wrapped_longitude_distance(float longitude, float center) {
@@ -492,6 +518,7 @@ vec3 shade_earth(vec3 point, vec3 ray_direction) {
     vec4 reference = earth_reference(local);
     float land_reference_value = land_reference(local);
     float land = land_mask(local);
+    reference.rgb = repair_missing_ocean_source(local, reference.rgb, land);
     vec3 geometric = geometric_earth_normal(point);
     vec3 normal = mix(ocean_normal(point, geometric), terrain_normal(point, land), land);
 
