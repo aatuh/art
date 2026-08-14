@@ -84,7 +84,8 @@ impl PlanetRenderer {
             .ok_or_else(|| JsValue::from_str("WebGL 2 is unavailable."))?
             .dyn_into::<Gl>()?;
         let vertex = compile_shader(&gl, Gl::VERTEX_SHADER, VERTEX_SHADER)?;
-        let fragment = compile_shader(&gl, Gl::FRAGMENT_SHADER, FRAGMENT_SHADER)?;
+        let fragment_source = crate::planet_shader::fragment_source().map_err(JsValue::from_str)?;
+        let fragment = compile_shader(&gl, Gl::FRAGMENT_SHADER, &fragment_source)?;
         let program = link_program(&gl, &vertex, &fragment)?;
         gl.use_program(Some(&program));
 
@@ -502,4 +503,3 @@ fn link_program(
 }
 
 const VERTEX_SHADER: &str = include_str!("shaders/planet.vert.glsl");
-const FRAGMENT_SHADER: &str = include_str!("shaders/planet_v4.frag.glsl");
