@@ -9,6 +9,7 @@ pub mod fps;
 mod math;
 pub mod planet;
 pub mod simulation_clock;
+pub mod surface_lod;
 
 pub use artwork::{Artwork, ArtworkKind, Destination, is_valid_artwork_id};
 pub use artworks::{ARTWORKS, BLACK_CUBE_ROOM, MVP_GALLERY_WORLD, ORBITING_EARTH};
