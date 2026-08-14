@@ -7,14 +7,8 @@ pub const TERRAIN_SHADOW_ORIGIN_BIAS_M: f64 = 80.0;
 /// Softens the binary terrain-clearance test over roughly half a kilometre.
 pub const TERRAIN_SHADOW_PENUMBRA_M: f64 = 450.0;
 /// Geometric light-ray samples, ordered near-to-far from the shaded point.
-pub const TERRAIN_SHADOW_SAMPLE_DISTANCES_M: [f64; 6] = [
-    800.0,
-    2_000.0,
-    5_000.0,
-    12_000.0,
-    28_000.0,
-    60_000.0,
-];
+pub const TERRAIN_SHADOW_SAMPLE_DISTANCES_M: [f64; 6] =
+    [800.0, 2_000.0, 5_000.0, 12_000.0, 28_000.0, 60_000.0];
 
 /// Whether terrain-shadow sampling should run for the current fragment/camera state.
 pub fn terrain_shadow_enabled(camera_altitude_m: f64, land_fraction: f64) -> bool {
@@ -56,16 +50,24 @@ mod tests {
 
     #[test]
     fn sample_distances_are_strictly_increasing() {
-        assert!(TERRAIN_SHADOW_SAMPLE_DISTANCES_M
-            .windows(2)
-            .all(|pair| pair[0] < pair[1]));
+        assert!(
+            TERRAIN_SHADOW_SAMPLE_DISTANCES_M
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
     }
 
     #[test]
     fn shadow_sampling_is_limited_to_near_land_views() {
         assert!(terrain_shadow_enabled(400_000.0, 1.0));
-        assert!(terrain_shadow_enabled(TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M, 0.5));
-        assert!(!terrain_shadow_enabled(TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M + 1.0, 1.0));
+        assert!(terrain_shadow_enabled(
+            TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M,
+            0.5
+        ));
+        assert!(!terrain_shadow_enabled(
+            TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M + 1.0,
+            1.0
+        ));
         assert!(!terrain_shadow_enabled(10_000.0, 0.0));
         assert!(!terrain_shadow_enabled(f64::NAN, 1.0));
     }
