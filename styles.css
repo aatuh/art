@@ -28,7 +28,8 @@ h1 { max-width: 16ch; margin-bottom: 2.5rem; font-size: clamp(2.5rem, 8vw, 6rem)
 .installation-toolbar { position: absolute; z-index: 4; top: 1rem; left: 1rem; right: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #111; pointer-events: auto; }
 .fps-installation[data-artwork="orbiting-earth"] .installation-toolbar { color: #f7f9ff; text-shadow: 0 1px 4px #000; }
 .toolbar-actions { display: flex; gap: .5rem; }
-.back-button, .enter-fps-button, .fullscreen-button, .settings-button, .binding-button { border: 1px solid #252525; border-radius: .2rem; padding: .65rem .85rem; background: rgb(255 255 255 / .86); color: inherit; cursor: pointer; }
+.back-button, .enter-fps-button, .fullscreen-button, .settings-button, .time-scale-button, .binding-button { border: 1px solid #252525; border-radius: .2rem; padding: .65rem .85rem; background: rgb(255 255 255 / .86); color: inherit; cursor: pointer; }
+.camera-speed-readout { align-self: center; min-width: 8.2rem; padding: .55rem .7rem; border: 1px solid rgb(255 255 255 / .35); border-radius: .2rem; background: rgb(0 0 0 / .46); color: #fff; font-size: .8rem; font-variant-numeric: tabular-nums; text-align: center; text-shadow: none; white-space: nowrap; }
 
 .room-observer { position: absolute; z-index: 1; inset: 0; touch-action: none; cursor: crosshair; user-select: none; }
 .crosshair { display: none; }
@@ -54,6 +55,6 @@ h1 { max-width: 16ch; margin-bottom: 2.5rem; font-size: clamp(2.5rem, 8vw, 6rem)
   .installation-toolbar { align-items: flex-start; }
   .installation-toolbar > span { display: none; }
   .toolbar-actions { flex-direction: column; align-items: flex-end; }
-  .enter-fps-button, .fullscreen-button, .settings-button, .back-button { padding: .45rem .6rem; font-size: .82rem; }
+  .enter-fps-button, .fullscreen-button, .settings-button, .time-scale-button, .back-button, .camera-speed-readout { padding: .45rem .6rem; font-size: .82rem; }
   .binding-list { grid-template-columns: 1fr; }
 }

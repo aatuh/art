@@ -15,6 +15,7 @@ use web_sys::{
 
 use crate::{
     camera_api::CameraState,
+    navigation_display::format_camera_speed_mps,
     planet::{
         CelestialFrame, EARTH_ATMOSPHERE_TOP_M, EARTH_EQUATORIAL_RADIUS_M, EARTH_POLAR_RADIUS_M,
         MOON_MEAN_RADIUS_M, SUN_NOMINAL_RADIUS_M, Vec3d,
@@ -51,6 +52,7 @@ pub(super) struct PlanetRenderer {
     orbital_surface_ready: Cell<bool>,
     regional_surface_ready: Cell<bool>,
     elevation_ready: Cell<bool>,
+    speed_readout: Element,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -154,6 +156,7 @@ impl PlanetRenderer {
 
         let seconds_since_j2000 = js_sys::Date::now() / 1_000.0 - UNIX_SECONDS_AT_J2000;
         let clock = Rc::new(Cell::new(SimulationClock::new(seconds_since_j2000)));
+        let speed_readout = attach_speed_readout(canvas)?;
         attach_time_control(canvas, Rc::clone(&clock))?;
 
         Ok(Self {
@@ -176,6 +179,7 @@ impl PlanetRenderer {
             orbital_surface_ready: Cell::new(false),
             regional_surface_ready: Cell::new(false),
             elevation_ready: Cell::new(false),
+            speed_readout,
             uniforms,
             clock,
         })
@@ -205,6 +209,11 @@ impl PlanetRenderer {
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
         self.gl.clear(Gl::COLOR_BUFFER_BIT);
         self.gl.use_program(Some(&self.program));
+
+        let speed_label = format_camera_speed_mps(visitor.camera_speed_mps);
+        if self.speed_readout.text_content().as_deref() != Some(speed_label.as_str()) {
+            self.speed_readout.set_text_content(Some(&speed_label));
+        }
 
         let camera_altitude_m = visitor.radial_altitude_above_earth_m().max(0.0);
         let surface_tier = select_surface_tier(
@@ -368,6 +377,21 @@ fn create_asset_image(source: &str) -> Result<HtmlImageElement, JsValue> {
     Ok(image)
 }
 
+fn attach_speed_readout(canvas: &HtmlCanvasElement) -> Result<Element, JsValue> {
+    let document = canvas
+        .owner_document()
+        .ok_or_else(|| JsValue::from_str("The gallery document is unavailable."))?;
+    let toolbar_actions = installation_toolbar_actions(canvas)?;
+    let readout = document.create_element("span")?;
+    readout.set_attribute("class", "camera-speed-readout")?;
+    readout.set_attribute("aria-label", "Current virtual camera speed")?;
+    readout.set_text_content(Some(&format_camera_speed_mps(
+        CameraState::default().camera_speed_mps,
+    )));
+    toolbar_actions.append_child(&readout)?;
+    Ok(readout)
+}
+
 fn attach_time_control(
     canvas: &HtmlCanvasElement,
     clock: Rc<Cell<SimulationClock>>,
@@ -375,12 +399,7 @@ fn attach_time_control(
     let document = canvas
         .owner_document()
         .ok_or_else(|| JsValue::from_str("The gallery document is unavailable."))?;
-    let installation = canvas
-        .parent_element()
-        .ok_or_else(|| JsValue::from_str("The Earth installation is unavailable."))?;
-    let toolbar_actions = installation
-        .query_selector(".toolbar-actions")?
-        .ok_or_else(|| JsValue::from_str("The installation toolbar is unavailable."))?;
+    let toolbar_actions = installation_toolbar_actions(canvas)?;
     let button = document.create_element("button")?;
     button.set_attribute("type", "button")?;
     button.set_attribute("class", "time-scale-button")?;
@@ -397,6 +416,14 @@ fn attach_time_control(
     button.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref())?;
     on_click.forget();
     Ok(())
+}
+
+fn installation_toolbar_actions(canvas: &HtmlCanvasElement) -> Result<Element, JsValue> {
+    canvas
+        .parent_element()
+        .ok_or_else(|| JsValue::from_str("The Earth installation is unavailable."))?
+        .query_selector(".toolbar-actions")?
+        .ok_or_else(|| JsValue::from_str("The installation toolbar is unavailable."))
 }
 
 fn update_time_button(button: &Element, scale: f64) -> Result<(), JsValue> {
