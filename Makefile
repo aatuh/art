@@ -14,6 +14,7 @@ build: ## Build a static production site in dist/.
 	@mkdir -p dist
 	@wasm-pack build --target web --release --out-dir dist/pkg --out-name gallery
 	@cp index.html styles.css bootstrap.js dist/
+	@cp -R assets dist/
 
 check: test ## Run formatting, lint, security, and production-build checks.
 	@cargo fmt --check
