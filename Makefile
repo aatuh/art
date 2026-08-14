@@ -18,7 +18,9 @@ build: ## Build a static production site in dist/.
 check: test ## Run formatting, lint, security, and production-build checks.
 	@cargo fmt --check
 	@cargo clippy --locked --all-targets -- -D warnings
-	@! rg -n 'innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(' index.html bootstrap.js src styles.css
+	@output=$$(grep -RInE 'innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(' index.html bootstrap.js src styles.css 2>&1); status=$$?; \
+		if [ $$status -eq 0 ]; then printf '%s\n' "$$output"; exit 1; \
+		elif [ $$status -gt 1 ]; then printf '%s\n' "$$output" >&2; exit $$status; fi
 	@$(MAKE) --no-print-directory build
 
 serve: build ## Serve the compiled gallery at http://127.0.0.1:8080/.
