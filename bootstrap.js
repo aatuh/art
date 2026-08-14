@@ -28,7 +28,6 @@ function syncAstronomicalInstallationCopy() {
 if (galleryRoot) {
   new MutationObserver(syncAstronomicalInstallationCopy).observe(galleryRoot, {
     childList: true,
-    subtree: true,
   });
 }
 
