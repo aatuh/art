@@ -9,8 +9,8 @@ use std::{cell::Cell, rc::Rc};
 
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{
-    Element, HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlBuffer, WebGlProgram,
-    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
+    Element, HtmlCanvasElement, HtmlImageElement, WebGl2RenderingContext as Gl, WebGlBuffer,
+    WebGlProgram, WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
 use crate::{
@@ -26,6 +26,7 @@ use super::dom::window;
 
 const UNIX_SECONDS_AT_J2000: f64 = 946_728_000.0;
 const MAX_DEVICE_PIXEL_RATIO: f64 = 2.0;
+const EARTH_SURFACE_512_WEBP_B64: &str = include_str!("earth_surface_512.webp.b64");
 
 pub(super) struct PlanetRenderer {
     canvas: HtmlCanvasElement,
@@ -35,6 +36,8 @@ pub(super) struct PlanetRenderer {
     _vertex_array: WebGlVertexArrayObject,
     surface_texture: WebGlTexture,
     land_mask_texture: WebGlTexture,
+    surface_image: HtmlImageElement,
+    surface_image_upload_attempted: Cell<bool>,
     uniforms: Uniforms,
     clock: Rc<Cell<SimulationClock>>,
 }
@@ -94,6 +97,7 @@ impl PlanetRenderer {
 
         let surface_texture = texture::create(&gl)?;
         let land_mask_texture = texture::create(&gl)?;
+        let surface_image = create_surface_image()?;
         let uniforms = Uniforms {
             resolution: required_uniform(&gl, &program, "u_resolution")?,
             camera_forward: required_uniform(&gl, &program, "u_camera_forward")?,
@@ -136,12 +140,15 @@ impl PlanetRenderer {
             _vertex_array: vertex_array,
             surface_texture,
             land_mask_texture,
+            surface_image,
+            surface_image_upload_attempted: Cell::new(false),
             uniforms,
             clock,
         })
     }
 
     pub(super) fn render(&self, visitor: CameraState, now: f64) {
+        self.try_upload_high_resolution_surface();
         let (width, height) = resize_canvas(&self.canvas);
         self.gl.viewport(0, 0, width as i32, height as i32);
         self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
@@ -211,6 +218,41 @@ impl PlanetRenderer {
             .uniform1f(Some(&self.uniforms.time), animation_seconds as f32);
         self.gl.draw_arrays(Gl::TRIANGLES, 0, 3);
     }
+
+    fn try_upload_high_resolution_surface(&self) {
+        if self.surface_image_upload_attempted.get()
+            || !self.surface_image.complete()
+            || self.surface_image.natural_width() == 0
+        {
+            return;
+        }
+        self.surface_image_upload_attempted.set(true);
+        self.gl.active_texture(Gl::TEXTURE0);
+        self.gl
+            .bind_texture(Gl::TEXTURE_2D, Some(&self.surface_texture));
+        match self
+            .gl
+            .tex_image_2d_with_u32_and_u32_and_html_image_element(
+                Gl::TEXTURE_2D,
+                0,
+                Gl::RGBA as i32,
+                Gl::RGBA,
+                Gl::UNSIGNED_BYTE,
+                &self.surface_image,
+            ) {
+            Ok(()) => self.gl.generate_mipmap(Gl::TEXTURE_2D),
+            Err(error) => web_sys::console::warn_1(&error),
+        }
+    }
+}
+
+fn create_surface_image() -> Result<HtmlImageElement, JsValue> {
+    let image = HtmlImageElement::new()?;
+    image.set_src(&format!(
+        "data:image/webp;base64,{}",
+        EARTH_SURFACE_512_WEBP_B64.trim()
+    ));
+    Ok(image)
 }
 
 fn attach_time_control(
