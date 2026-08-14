@@ -16,9 +16,10 @@ build: ## Build a static production site in dist/.
 	@cp index.html styles.css bootstrap.js dist/
 	@cp -R assets dist/
 
-check: test ## Run formatting, lint, security, and production-build checks.
+check: test ## Run formatting, lint, security, tooling, and production-build checks.
 	@cargo fmt --check
 	@cargo clippy --locked --all-targets -- -D warnings
+	@PYTHONPYCACHEPREFIX=target/pycache python3 -m py_compile scripts/*.py
 	@output=$$(grep -RInE 'innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(' index.html bootstrap.js src styles.css 2>&1); status=$$?; \
 		if [ $$status -eq 0 ]; then printf '%s\n' "$$output"; exit 1; \
 		elif [ $$status -gt 1 ]; then printf '%s\n' "$$output" >&2; exit $$status; fi
