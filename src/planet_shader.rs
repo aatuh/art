@@ -23,13 +23,13 @@ const ATMOSPHERE_RAYMARCH_BASE: &str = r#"    float step_length = (end_distance 
     for (int sample_index = 0; sample_index < 10; ++sample_index) {
         float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
 const ATMOSPHERE_RAYMARCH_REPLACEMENT: &str = r#"    int atmosphere_sample_count = u_camera_altitude_m < 500000.0
-        ? 16
-        : (u_camera_altitude_m < 5000000.0 ? 12 : 10);
+        ? 10
+        : (u_camera_altitude_m < 5000000.0 ? 8 : 6);
     float step_length = (end_distance - start_distance) / float(atmosphere_sample_count);
     vec3 view_depth = vec3(0.0);
     vec3 rayleigh_sum = vec3(0.0);
     vec3 mie_sum = vec3(0.0);
-    for (int sample_index = 0; sample_index < 16; ++sample_index) {
+    for (int sample_index = 0; sample_index < 10; ++sample_index) {
         if (sample_index >= atmosphere_sample_count) {
             break;
         }
@@ -38,16 +38,32 @@ const CLOUD_RAYMARCH_BASE: &str = r#"    float step_length = (end_distance - sta
     for (int sample_index = 0; sample_index < 8; ++sample_index) {
         float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
 const CLOUD_RAYMARCH_REPLACEMENT: &str = r#"    int cloud_sample_count = u_camera_altitude_m < 500000.0
-        ? 16
-        : (u_camera_altitude_m < 2000000.0 ? 12 : 8);
+        ? 8
+        : (u_camera_altitude_m < 2000000.0 ? 6 : 4);
     float step_length = (end_distance - start_distance) / float(cloud_sample_count);
     float sample_jitter = mix(0.2, 0.8, hash31(vec3(gl_FragCoord.xy, 17.0)));
-    for (int sample_index = 0; sample_index < 16; ++sample_index) {
+    for (int sample_index = 0; sample_index < 8; ++sample_index) {
         if (sample_index >= cloud_sample_count) {
             break;
         }
         float distance_along_ray =
             start_distance + (float(sample_index) + sample_jitter) * step_length;"#;
+const CLOUD_LIGHT_TRANSMISSION_BASE: &str = r#"float cloud_light_transmission(vec3 point, vec3 light_direction) {
+    float optical = 0.0;
+    for (int step_index = 0; step_index < 4; ++step_index) {
+        float distance_along_light = (float(step_index) + 1.0) * 3600.0;
+        optical += cloud_density(point + light_direction * distance_along_light);
+    }
+    return exp(-optical * 0.72);
+}"#;
+const CLOUD_LIGHT_TRANSMISSION_REPLACEMENT: &str = r#"float cloud_light_transmission(vec3 point, vec3 light_direction) {
+    float optical = 0.0;
+    for (int step_index = 0; step_index < 2; ++step_index) {
+        float distance_along_light = (float(step_index) + 1.0) * 6000.0;
+        optical += cloud_density(point + light_direction * distance_along_light);
+    }
+    return exp(-optical * 1.05);
+}"#;
 const SHADOW_INSERTION_MARKER: &str =
     "float cloud_shadow(vec3 surface_point, vec3 light_direction) {";
 const DIRECT_LIGHT_MARKER: &str = "    float direct = n_dot_l * visibility * cloud_light;";
@@ -79,9 +95,15 @@ pub fn fragment_source() -> Result<String, &'static str> {
         CLOUD_RAYMARCH_REPLACEMENT,
         "planet shader cloud-raymarch marker is missing or duplicated",
     )?;
+    let with_cloud_lighting = replace_exactly_once(
+        &with_cloud_quality,
+        CLOUD_LIGHT_TRANSMISSION_BASE,
+        CLOUD_LIGHT_TRANSMISSION_REPLACEMENT,
+        "planet shader cloud-light marker is missing or duplicated",
+    )?;
     let shadow_insertion = format!("{TERRAIN_SHADOW_MODULE}\n\n{SHADOW_INSERTION_MARKER}");
     let with_shadow = replace_exactly_once(
-        &with_cloud_quality,
+        &with_cloud_lighting,
         SHADOW_INSERTION_MARKER,
         &shadow_insertion,
         "planet shader terrain-shadow insertion marker is missing or duplicated",
@@ -136,22 +158,24 @@ mod tests {
     }
 
     #[test]
-    fn composed_shader_adapts_atmosphere_samples_to_camera_altitude() {
+    fn composed_shader_limits_atmosphere_work_per_fragment() {
         let shader = fragment_source().expect("stable planet shader markers");
         assert!(shader.contains("int atmosphere_sample_count"));
-        assert!(shader.contains("u_camera_altitude_m < 5000000.0"));
+        assert!(shader.contains("? 10"));
+        assert!(shader.contains("? 8 : 6"));
         assert!(shader.contains("sample_index >= atmosphere_sample_count"));
-        assert!(!shader.contains("sample_index < 10"));
     }
 
     #[test]
-    fn composed_shader_adapts_cloud_samples_to_camera_altitude() {
+    fn composed_shader_limits_cloud_work_per_fragment() {
         let shader = fragment_source().expect("stable planet shader markers");
         assert!(shader.contains("int cloud_sample_count"));
-        assert!(shader.contains("u_camera_altitude_m < 2000000.0"));
+        assert!(shader.contains("? 8"));
+        assert!(shader.contains("? 6 : 4"));
         assert!(shader.contains("sample_index >= cloud_sample_count"));
+        assert!(shader.contains("step_index < 2"));
         assert!(shader.contains("sample_jitter"));
-        assert!(!shader.contains("sample_index < 8"));
+        assert!(!shader.contains("step_index < 4; ++step_index) {\n        float distance_along_light"));
     }
 
     #[test]
