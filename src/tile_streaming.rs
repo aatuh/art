@@ -92,14 +92,18 @@ mod tests {
             4,
         );
         assert_eq!(delta.requested.len(), 4);
-        assert!(delta
-            .requested
-            .windows(2)
-            .all(|pair| pair[0].tile.level <= pair[1].tile.level));
-        assert!(delta
-            .requested
-            .iter()
-            .all(|request| request.tile.level < plan.level));
+        assert!(
+            delta
+                .requested
+                .windows(2)
+                .all(|pair| pair[0].tile.level <= pair[1].tile.level)
+        );
+        assert!(
+            delta
+                .requested
+                .iter()
+                .all(|request| request.tile.level < plan.level)
+        );
     }
 
     #[test]
@@ -125,7 +129,10 @@ mod tests {
             0,
         );
         assert!(delta.requested.is_empty());
-        assert_eq!(delta.retained.len(), plan.requests(TileLayer::Elevation).len());
+        assert_eq!(
+            delta.retained.len(),
+            plan.requests(TileLayer::Elevation).len()
+        );
     }
 
     #[test]
