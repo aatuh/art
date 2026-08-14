@@ -312,8 +312,7 @@ pub fn earth_rotation_angle_radians(seconds_since_j2000: f64) -> f64 {
     };
     let ut1_days = seconds / SECONDS_PER_DAY;
     (std::f64::consts::TAU
-        * (J2000_EARTH_ROTATION_ANGLE_TURNS
-            + EARTH_ROTATION_RATE_TURNS_PER_UT1_DAY * ut1_days))
+        * (J2000_EARTH_ROTATION_ANGLE_TURNS + EARTH_ROTATION_RATE_TURNS_PER_UT1_DAY * ut1_days))
         .rem_euclid(std::f64::consts::TAU)
 }
 
