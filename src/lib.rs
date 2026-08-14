@@ -9,6 +9,7 @@ pub mod fps;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod math;
 pub mod planet;
+pub mod planet_shader;
 pub mod planet_tiles;
 pub mod simulation_clock;
 pub mod surface_lod;
