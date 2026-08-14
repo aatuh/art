@@ -16,16 +16,34 @@ const OCEAN_NORMAL_BASE: &str = r#"vec3 ocean_normal(vec3 point, vec3 geometric)
     float wave_c = noise3(local * 950.0 + vec3(time * 0.02, 0.0, -time * 0.015)) * 2.0 - 1.0;
     return normalize(geometric + tangent * (wave_a + wave_c) * 0.012 + bitangent * wave_b * 0.010);
 }"#;
+const ATMOSPHERE_RAYMARCH_BASE: &str = r#"    float step_length = (end_distance - start_distance) / 10.0;
+    vec3 view_depth = vec3(0.0);
+    vec3 rayleigh_sum = vec3(0.0);
+    vec3 mie_sum = vec3(0.0);
+    for (int sample_index = 0; sample_index < 10; ++sample_index) {
+        float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
+const ATMOSPHERE_RAYMARCH_REPLACEMENT: &str = r#"    int atmosphere_sample_count = u_camera_altitude_m < 500000.0
+        ? 16
+        : (u_camera_altitude_m < 5000000.0 ? 12 : 10);
+    float step_length = (end_distance - start_distance) / float(atmosphere_sample_count);
+    vec3 view_depth = vec3(0.0);
+    vec3 rayleigh_sum = vec3(0.0);
+    vec3 mie_sum = vec3(0.0);
+    for (int sample_index = 0; sample_index < 16; ++sample_index) {
+        if (sample_index >= atmosphere_sample_count) {
+            break;
+        }
+        float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
 const CLOUD_RAYMARCH_BASE: &str = r#"    float step_length = (end_distance - start_distance) / 8.0;
     for (int sample_index = 0; sample_index < 8; ++sample_index) {
         float distance_along_ray = start_distance + (float(sample_index) + 0.5) * step_length;"#;
-const CLOUD_RAYMARCH_REPLACEMENT: &str = r#"    int sample_count = u_camera_altitude_m < 500000.0
+const CLOUD_RAYMARCH_REPLACEMENT: &str = r#"    int cloud_sample_count = u_camera_altitude_m < 500000.0
         ? 16
         : (u_camera_altitude_m < 2000000.0 ? 12 : 8);
-    float step_length = (end_distance - start_distance) / float(sample_count);
+    float step_length = (end_distance - start_distance) / float(cloud_sample_count);
     float sample_jitter = mix(0.2, 0.8, hash31(vec3(gl_FragCoord.xy, 17.0)));
     for (int sample_index = 0; sample_index < 16; ++sample_index) {
-        if (sample_index >= sample_count) {
+        if (sample_index >= cloud_sample_count) {
             break;
         }
         float distance_along_ray =
@@ -49,8 +67,14 @@ pub fn fragment_source() -> Result<String, &'static str> {
         OCEAN_SURFACE_MODULE.trim_end(),
         "planet shader ocean-normal marker is missing or duplicated",
     )?;
-    let with_cloud_quality = replace_exactly_once(
+    let with_atmosphere_quality = replace_exactly_once(
         &with_ocean,
+        ATMOSPHERE_RAYMARCH_BASE,
+        ATMOSPHERE_RAYMARCH_REPLACEMENT,
+        "planet shader atmosphere-raymarch marker is missing or duplicated",
+    )?;
+    let with_cloud_quality = replace_exactly_once(
+        &with_atmosphere_quality,
         CLOUD_RAYMARCH_BASE,
         CLOUD_RAYMARCH_REPLACEMENT,
         "planet shader cloud-raymarch marker is missing or duplicated",
@@ -112,11 +136,20 @@ mod tests {
     }
 
     #[test]
+    fn composed_shader_adapts_atmosphere_samples_to_camera_altitude() {
+        let shader = fragment_source().expect("stable planet shader markers");
+        assert!(shader.contains("int atmosphere_sample_count"));
+        assert!(shader.contains("u_camera_altitude_m < 5000000.0"));
+        assert!(shader.contains("sample_index >= atmosphere_sample_count"));
+        assert!(!shader.contains("sample_index < 10"));
+    }
+
+    #[test]
     fn composed_shader_adapts_cloud_samples_to_camera_altitude() {
         let shader = fragment_source().expect("stable planet shader markers");
-        assert!(shader.contains("u_camera_altitude_m < 500000.0"));
+        assert!(shader.contains("int cloud_sample_count"));
         assert!(shader.contains("u_camera_altitude_m < 2000000.0"));
-        assert!(shader.contains("sample_index < 16"));
+        assert!(shader.contains("sample_index >= cloud_sample_count"));
         assert!(shader.contains("sample_jitter"));
         assert!(!shader.contains("sample_index < 8"));
     }
