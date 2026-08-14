@@ -183,8 +183,7 @@ impl PlanetRenderer {
             SurfaceTier::Orbital => &self.orbital_surface_texture,
         };
         self.gl.active_texture(Gl::TEXTURE0);
-        self.gl
-            .bind_texture(Gl::TEXTURE_2D, Some(surface_texture));
+        self.gl.bind_texture(Gl::TEXTURE_2D, Some(surface_texture));
         self.gl.active_texture(Gl::TEXTURE1);
         self.gl
             .bind_texture(Gl::TEXTURE_2D, Some(&self.land_mask_texture));
