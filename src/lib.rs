@@ -11,6 +11,7 @@ pub mod planet;
 pub mod planet_tiles;
 pub mod simulation_clock;
 pub mod surface_lod;
+pub mod tile_streaming;
 
 pub use artwork::{Artwork, ArtworkKind, Destination, is_valid_artwork_id};
 pub use artworks::{ARTWORKS, BLACK_CUBE_ROOM, MVP_GALLERY_WORLD, ORBITING_EARTH};
