@@ -1,79 +1,145 @@
 # Planet simulation: numerical and physical foundation
 
-This document describes the physical-coordinate and visitor-navigation foundation for **A World in Light**. It is deliberately renderer-independent so the browser renderer can be replaced without rewriting celestial motion or camera logic.
+This document defines the physical-coordinate, time, ephemeris, and visitor-navigation model for
+**A World in Light**. The model preserves useful astronomical scale and lighting relationships; it
+is an artwork simulation, not an orbit propagator or scientific observation tool.
 
-## Scope of this milestone
+## Implemented foundation
 
-The feature branch now establishes:
+The renderer-independent domain code provides:
 
 - SI-unit, double-precision positions for Earth, Moon, Sun, and the visitor;
-- WGS 84 Earth dimensions and an oblate Earth ellipsoid;
-- real relative radii and mean orbital-distance scale;
-- deterministic low-cost apparent solar and lunar positions from seconds since J2000;
-- camera-relative conversion before values are narrowed to WebGL-friendly `f32` values;
-- logarithmic, unconstrained six-direction flight from surface-detail speeds to interplanetary speeds;
-- deterministic tests for scale ratios, apparent angular sizes, ellipsoid intersections, precision, flight direction, and speed limits.
+- WGS 84 dimensions and an oblate Earth ellipsoid;
+- real body radii, astronomical-unit scale, and varying Earth–Moon/Sun distances;
+- deterministic low-cost apparent geocentric solar and lunar positions from seconds since J2000;
+- an IERS-style Earth Rotation Angle with the J2000 phase and sidereal rate;
+- camera-relative conversion before values are narrowed for WebGL;
+- a shared, bilinearly filtered Earth height field for rendered displacement and navigation;
+- six-direction exhibition flight with terrain-clearance-sensitive speed and solid-body
+  constraints; and
+- deterministic tests for scale ratios, angular sizes, ephemerides, ellipsoid intersections,
+  camera precision, movement, recovery, and collision tunnelling.
 
-This is not yet the final renderer. The current WebGL artwork remains room-scale until the browser adapter is switched to the new camera and physical frame.
-
-## Coordinate convention
+## Coordinate and precision contract
 
 - Unit: metre.
-- Precision: `f64` in domain and navigation code.
+- Domain and navigation precision: `f64`.
 - Origin: Earth's centre.
-- Positive `Y`: north celestial direction.
-- GPU conversion: subtract the visitor position in `f64`, then divide the relative vector by Earth's equatorial radius and cast to `f32`.
+- Positive `Y`: northward equatorial/celestial direction.
+- Earth-fixed longitude: zero on `+X`, increasing toward `+Z`; the celestial-to-terrestrial
+  transform subtracts the IERS Earth Rotation Angle from inertial longitude. Positive solar
+  declination therefore points north during northern-hemisphere summer.
+- Current GPU boundary: subtract the visitor position in `f64`, then cast the resulting
+  camera-relative metre vector to `f32` for the active shader's `*_m` uniforms.
 
-Subtracting the camera first is non-negotiable. At lunar and solar distances an absolute `f32` position cannot retain the metre- or kilometre-scale precision needed near a body. Camera-relative rendering keeps nearby geometry numerically stable while allowing distant bodies to retain the correct apparent angle.
+Subtracting the camera first is essential. Casting an absolute lunar- or solar-distance position to
+`f32` would discard metre- and kilometre-scale detail near a body. The active orbital shader keeps
+camera-relative metres and normalizes individual sphere/ellipsoid equations internally where that
+improves numerical conditioning; it does not globally divide all uniform positions into Earth-radius
+units.
 
-## Physical constants
+## Time, rotation, and apparent ephemerides
 
-The implementation records constants close to the code that consumes them:
+The browser initializes simulation time from its UTC wall clock relative to J2000. A deterministic
+clock advances it at `1×`, `60×`, `3600×`, or paused. Negative/non-finite frame progression cannot
+rewind the clock. The same simulated interval drives Earth rotation, apparent Sun/Moon positions,
+and artistic material animation.
 
-- WGS 84 Earth equatorial radius: 6,378,137 m;
-- WGS 84 Earth polar radius: 6,356,752.314245 m;
-- mean Earth–Moon distance: 384,400 km;
-- Moon mean radius: 1,737.4 km;
-- nominal solar radius: 695,700 km;
-- astronomical unit: exactly 149,597,870,700 m;
-- speed of light: exactly 299,792,458 m/s.
+Earth remains at the geocentric origin. The Sun model uses dominant solar mean-anomaly,
+eccentricity, ecliptic-longitude, obliquity, and distance terms. The Moon model uses dominant lunar
+mean-longitude, anomaly, latitude/inclination, and distance terms. This is enough to preserve
+plausible changing angular size, phase, and eclipse geometry, but it omits higher-order
+perturbations, light-time iteration, precession/nutation, libration, topocentric parallax, and
+barycentric N-body dynamics.
 
-The Moon and Sun equations are deliberately low-cost analytical approximations. They include dominant anomaly, eccentricity, inclination, and obliquity terms and are suitable for visual simulation. They are not a substitute for JPL ephemerides, navigation, occultation prediction, or scientific measurement.
+Earth rotation follows the IERS Earth Rotation Angle phase and rate while treating elapsed browser
+UTC seconds as approximate UT1. DUT1, leap-second table updates, polar motion, precession, and
+nutation are not applied. Consequently the surface orientation is visually grounded but is not a
+navigation-grade Greenwich orientation for an exact observation time.
 
-## Visitor flight
+## Recorded constants
 
-The flight controller is exhibition-oriented rather than a spacecraft dynamics simulator:
+| Quantity | Value used |
+| --- | ---: |
+| WGS 84 Earth equatorial radius | 6,378,137 m |
+| WGS 84 Earth polar radius | 6,356,752.314245 m |
+| Mean Earth radius | 6,371,008.8 m |
+| Renderer atmosphere cutoff | 100,000 m above the ellipsoid |
+| Artistic Earth base-height range | 0–10,000 m above the ellipsoid |
+| Local procedural relief / collision reserve | 0–200 m |
+| Earth surface inspection clearance | 300 m above conservative terrain |
+| Earth sidereal rotation period | 86,164.0905 s |
+| Mean Earth–Moon distance | 384,400,000 m |
+| Moon mean radius | 1,737,400 m |
+| Nominal solar radius | 695,700,000 m |
+| Astronomical unit | exactly 149,597,870,700 m |
+| Speed of light | exactly 299,792,458 m/s |
 
-- no collision or gravity is imposed;
-- movement follows camera forward/right/up axes;
-- diagonal input is normalized;
-- acceleration and braking are damped to reduce motion discomfort;
-- cruise speed changes in logarithmic notches;
-- speed is capped at 0.25 c;
-- invalid or runaway state resets to a known orbital view;
-- focusing Earth computes an exact camera orientation rather than applying an approximate turn.
+The 100 km atmosphere top is a finite rendering boundary, not a claim that the real atmosphere has
+a hard edge. The solar/lunar equations and constants are placed close to the pure code that consumes
+them so tests can enforce scale and angular-size invariants.
 
-Relativistic time dilation and orbital mechanics are intentionally excluded from visitor movement. At the exhibition's highest speeds, movement is a navigation affordance that lets a visitor cross the actual scale, not a claim that the observer is a physically realizable vehicle.
+## Visitor flight and collision model
 
-## Rendering roadmap
+The visitor is a virtual exhibition camera, not a spacecraft:
 
-The next browser-facing stages are:
+- movement follows camera forward/right/up axes and normalizes diagonal input;
+- acceleration and braking use exponential damping, with frame delta bounded to 0.1 s;
+- base speed is proportional to non-negative clearance from the nearest terrain-aware Earth, Moon,
+  or Sun surface and then adjusted in logarithmic user-controlled notches;
+- the normal minimum is 0.25 m/s, fast-travel boost is 12×, and final speed is capped at 0.1 AU/s
+  (about 50 times light speed);
+- Earth collision searches a swept segment inside a WGS 84 shell, samples the same 2048×1024
+  bilinear base-height field as WebGL, and reserves the full 200 m procedural-relief envelope.
+  Contact is projected to that conservative terrain radius with a nominal 2 m clearance. Moon and
+  Sun retain swept segment-versus-sphere collision with the same clearance;
+- the surface-inspection preset chooses the most sun-facing of six fixed, moderately cloudy land
+  sites, keeps the physical Earth and current lighting unchanged, and places the visitor 300 m
+  above conservative terrain with an 18-degree north-facing view below the terrain-relative 1.5 km
+  cloud base;
+- contact removes inward velocity, preventing a high-speed step from tunnelling through a body;
+  and
+- non-finite state or travel beyond 100 AU from the origin resets to the known initial view.
 
-1. replace the room player with `SpaceflightState` for the planet artwork;
-2. render Earth, Moon, and the finite solar disc analytically from camera-relative physical positions;
-3. add measured Earth surface datasets and a land/water/material hierarchy;
-4. implement atmosphere transmittance, multi-scattering, sky-view, and aerial-perspective lookup tables;
-5. add cloud volumes, cloud shadows, and temporal reprojection;
-6. add terrain and ocean level-of-detail suitable for descent below orbital altitude;
-7. validate reference views from ground level, aircraft altitude, low orbit, lunar distance, and interplanetary space.
+The superluminal cap is intentional and must not be interpreted as physical motion. There is no
+gravity, inertia from a spacecraft mass model, orbital insertion, fuel, relativistic time dilation,
+or atmospheric drag. Earth collision and speed adaptation include the shared artistic terrain
+field and conservative local-relief reserve; oceans remain at the ellipsoid, while clouds and
+atmosphere are non-solid. Moon and Sun collision use their reference spheres.
+
+## Relationship to the renderer
+
+The multipass WebGL renderer consumes this frame to preserve finite solar/lunar angular size,
+WGS-84 Earth shape, displaced artistic terrain, phase, and mutual shadows. Rendering itself is
+bounded and approximate: atmosphere and clouds use small fixed sample counts, eclipse visibility is
+a smooth finite-disc calculation, and Earth height is artistic rather than measured local
+topography. See
+[`earth-rendering.md`](earth-rendering.md) for exact pass order, measured asset provenance, sample
+bounds, performance policy, and visual limitations.
+
+Measured ground-scale fidelity would require a licensed high-resolution elevation source, runtime
+tiled LOD, and validation against ground/aircraft reference views. The current base field is shared
+between CPU and GPU, while collision deliberately reserves the maximum procedural relief instead of
+matching each local hill exactly. Navigation-grade astronomy would separately require a maintained
+time standard and a high-accuracy ephemeris such as JPL data. Neither capability is currently
+shipped.
 
 ## Research basis
 
-Primary references used for this foundation and the following renderer stages:
+Primary and foundational references used to choose constants and approximations:
 
-- NASA Science, *Moon Facts* and *Facts About Earth*;
-- NASA/JPL Solar System Dynamics, *Planetary Physical Parameters*;
-- National Geospatial-Intelligence Agency, *Department of Defense World Geodetic System 1984*;
-- IAU 2012 Resolution B2, definition of the astronomical unit;
-- Eric Bruneton and Fabrice Neyret, *Precomputed Atmospheric Scattering*, 2008;
-- Eric Bruneton, *Precomputed Atmospheric Scattering: a New Implementation*, 2017.
+- [NGA, *Department of Defense World Geodetic System 1984*](https://earth-info.nga.mil/php/download.php?file=coord-wgs84)
+- [IERS Conventions (2010), Chapter 5: transformation between celestial and terrestrial systems](https://iers-conventions.obspm.fr/content/chapter5/icc5.pdf)
+- [NOAA Global Monitoring Laboratory, solar-position equations](https://gml.noaa.gov/grad/solcalc/solareqns.PDF)
+- [IAU 2012 Resolution B2, definition of the astronomical unit](https://www.iau.org/static/resolutions/IAU2012_English.pdf)
+- [NASA, *Facts About Earth*](https://science.nasa.gov/earth/facts/) and [*Moon Facts*](https://science.nasa.gov/moon/facts/)
+- [NASA/JPL Solar System Dynamics, planetary physical parameters](https://ssd.jpl.nasa.gov/planets/phys_par.html)
+- [WMO International Cloud Atlas, cloud-level definitions](https://cloudatlas.wmo.int/en/clouds-definitions.html)
+- [NASA, *What Are Clouds?*](https://www.nasa.gov/earth/what-are-clouds-grades-5-8/)
+- [NASA Earth Observatory, night-side airglow observations](https://earthobservatory.nasa.gov/images/92912/earth-awash-in-lights-of-the-ni)
+- Eric Bruneton and Fabrice Neyret, [*Precomputed Atmospheric Scattering* (2008)](https://inria.hal.science/inria-00288758)
+- Eric Bruneton, [*Precomputed Atmospheric Scattering: a New Implementation* (2017)](https://inria.hal.science/hal-01520758)
+
+The Bruneton work informs the physical vocabulary and future multiple-scattering path; the shipped
+shader uses the cheaper bounded single-scattering model documented in `earth-rendering.md` rather
+than that precomputed algorithm.

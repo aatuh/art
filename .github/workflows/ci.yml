@@ -19,13 +19,11 @@ jobs:
         run: rustup toolchain install 1.85.0 --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown
       - name: Install pinned wasm-pack
         run: cargo +stable install wasm-pack --version 0.15.0 --locked
-      - name: Run repository quality gate
-        run: |
-          rustup default 1.85.0
-          make check
       - name: Install GLSL validator
         run: |
           sudo apt-get update
           sudo apt-get install --yes glslang-tools
-      - name: Validate planetary shaders
-        run: sh scripts/check_planet_shaders.sh
+      - name: Run repository quality gate
+        run: |
+          rustup default 1.85.0
+          make check

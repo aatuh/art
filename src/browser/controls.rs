@@ -1,91 +1,37 @@
-//! Pointer-lock input and render-loop state for room and virtual-camera visiting.
+//! Shared browser input adapter.
 //!
-//! The astronomical mode moves only the rendered viewpoint; it does not control a vehicle.
+//! This component owns pointer lock, configurable bindings, and raw browser events. It delegates
+//! simulation and artwork-specific commands to the mounted installation runtime.
+
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+
+use wasm_bindgen::{JsCast, prelude::JsValue};
+use web_sys::{Document, Element, HtmlInputElement, KeyboardEvent, MouseEvent};
+
+use crate::input::{InputSettings, is_supported_key_code};
 
 use super::{
     dom::{element, text_element, window},
-    rendering::{NavigationMode, SceneRenderer},
+    lifecycle::{AnimationFrameLoop, EventListeners, ViewLifecycle},
+    runtime::{ActionState, InstallationRuntime, VisitorAction},
     storage::save_settings,
 };
-use crate::{
-    exhibition_camera::{SpaceflightInput as CameraInput, SpaceflightState as CameraState},
-    fps::{FpsInput, FpsSettings, PlayerState, is_supported_key_code},
-};
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
-use wasm_bindgen::{JsCast, closure::Closure, prelude::JsValue};
-use web_sys::{Document, Element, Event, HtmlInputElement, KeyboardEvent, MouseEvent};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Action {
-    Forward,
-    Backward,
-    Left,
-    Right,
-    Jump,
-    Crouch,
-}
-
-impl Action {
-    const ALL: [Self; 6] = [
-        Self::Forward,
-        Self::Backward,
-        Self::Left,
-        Self::Right,
-        Self::Jump,
-        Self::Crouch,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Forward => "Forward",
-            Self::Backward => "Backward",
-            Self::Left => "Strafe left",
-            Self::Right => "Strafe right",
-            Self::Jump => "Jump / ascend",
-            Self::Crouch => "Crouch / descend",
-        }
-    }
-
-    fn binding<'a>(self, settings: &'a FpsSettings) -> &'a str {
-        match self {
-            Self::Forward => &settings.bindings.forward,
-            Self::Backward => &settings.bindings.backward,
-            Self::Left => &settings.bindings.left,
-            Self::Right => &settings.bindings.right,
-            Self::Jump => &settings.bindings.jump,
-            Self::Crouch => &settings.bindings.crouch,
-        }
-    }
-
-    fn set_binding(self, settings: &mut FpsSettings, value: String) {
-        match self {
-            Self::Forward => settings.bindings.forward = value,
-            Self::Backward => settings.bindings.backward = value,
-            Self::Left => settings.bindings.left = value,
-            Self::Right => settings.bindings.right = value,
-            Self::Jump => settings.bindings.jump = value,
-            Self::Crouch => settings.bindings.crouch = value,
-        }
-    }
-}
+pub(super) type RuntimeHandle = Rc<RefCell<Box<dyn InstallationRuntime>>>;
 
 pub(super) struct Session {
-    player: PlayerState,
-    camera: CameraState,
-    settings: FpsSettings,
+    settings: InputSettings,
     pressed: BTreeSet<String>,
-    listening: Option<Action>,
-    binding_buttons: Vec<(Action, Element)>,
-    pub(super) active: bool,
+    listening: Option<VisitorAction>,
+    binding_buttons: Vec<(VisitorAction, Element)>,
+    active: bool,
     pointer_locked: bool,
     last_frame_ms: Option<f64>,
 }
 
 impl Session {
-    pub(super) fn new(settings: FpsSettings) -> Self {
+    pub(super) fn new(settings: InputSettings) -> Self {
         Self {
-            player: PlayerState::default(),
-            camera: CameraState::default(),
             settings,
             pressed: BTreeSet::new(),
             listening: None,
@@ -96,45 +42,60 @@ impl Session {
         }
     }
 
-    fn room_input(&self) -> FpsInput {
-        FpsInput {
-            forward: self.action_pressed(Action::Forward),
-            backward: self.action_pressed(Action::Backward),
-            left: self.action_pressed(Action::Left),
-            right: self.action_pressed(Action::Right),
-            crouch: self.action_pressed(Action::Crouch),
+    pub(super) fn deactivate(&mut self) {
+        self.active = false;
+        self.pressed.clear();
+    }
+
+    fn binding(&self, action: VisitorAction) -> &str {
+        match action {
+            VisitorAction::Forward => &self.settings.bindings.forward,
+            VisitorAction::Backward => &self.settings.bindings.backward,
+            VisitorAction::Left => &self.settings.bindings.left,
+            VisitorAction::Right => &self.settings.bindings.right,
+            VisitorAction::Jump => &self.settings.bindings.jump,
+            VisitorAction::Crouch => &self.settings.bindings.crouch,
         }
     }
 
-    fn camera_input(&self) -> CameraInput {
-        CameraInput {
-            forward: self.action_pressed(Action::Forward),
-            backward: self.action_pressed(Action::Backward),
-            left: self.action_pressed(Action::Left),
-            right: self.action_pressed(Action::Right),
-            ascend: self.action_pressed(Action::Jump),
-            descend: self.action_pressed(Action::Crouch),
-            accelerated: self.pressed.contains("ShiftLeft") || self.pressed.contains("ShiftRight"),
-            stop: self.pressed.contains("KeyX"),
+    fn set_binding(&mut self, action: VisitorAction, value: String) {
+        match action {
+            VisitorAction::Forward => self.settings.bindings.forward = value,
+            VisitorAction::Backward => self.settings.bindings.backward = value,
+            VisitorAction::Left => self.settings.bindings.left = value,
+            VisitorAction::Right => self.settings.bindings.right = value,
+            VisitorAction::Jump => self.settings.bindings.jump = value,
+            VisitorAction::Crouch => self.settings.bindings.crouch = value,
         }
     }
 
-    fn action_pressed(&self, action: Action) -> bool {
-        let binding = action.binding(&self.settings);
-        self.pressed.contains(binding)
-            || (action == Action::Crouch
-                && matches!(binding, "ControlLeft" | "ControlRight")
-                && (self.pressed.contains("ControlLeft") || self.pressed.contains("ControlRight")))
+    fn action_for_code(&self, code: &str) -> Option<VisitorAction> {
+        VisitorAction::ALL.into_iter().find(|action| {
+            let binding = self.binding(*action);
+            binding == code
+                || (*action == VisitorAction::Crouch
+                    && matches!(binding, "ControlLeft" | "ControlRight")
+                    && matches!(code, "ControlLeft" | "ControlRight"))
+        })
     }
 
-    fn is_action_code(&self, code: &str) -> bool {
-        Action::ALL
-            .iter()
-            .any(|action| action.binding(&self.settings) == code)
-            || (matches!(
-                self.settings.bindings.crouch.as_str(),
-                "ControlLeft" | "ControlRight"
-            ) && matches!(code, "ControlLeft" | "ControlRight"))
+    fn action_state(&self) -> ActionState {
+        let pressed = |action| {
+            let binding = self.binding(action);
+            self.pressed.contains(binding)
+                || (action == VisitorAction::Crouch
+                    && matches!(binding, "ControlLeft" | "ControlRight")
+                    && (self.pressed.contains("ControlLeft")
+                        || self.pressed.contains("ControlRight")))
+        };
+        ActionState {
+            forward: pressed(VisitorAction::Forward),
+            backward: pressed(VisitorAction::Backward),
+            left: pressed(VisitorAction::Left),
+            right: pressed(VisitorAction::Right),
+            jump: pressed(VisitorAction::Jump),
+            crouch: pressed(VisitorAction::Crouch),
+        }
     }
 
     fn update_binding_buttons(&self) {
@@ -142,7 +103,7 @@ impl Session {
             button.set_text_content(Some(&format!(
                 "{}: {}",
                 action.label(),
-                action.binding(&self.settings)
+                self.binding(*action)
             )));
             let _ = button.remove_attribute("data-listening");
         }
@@ -152,6 +113,7 @@ impl Session {
 pub(super) fn create_settings_panel(
     document: &Document,
     session: &Rc<RefCell<Session>>,
+    listeners: &mut EventListeners,
 ) -> Result<Element, JsValue> {
     let panel = element(document, "aside", "fps-settings")?;
     panel.set_attribute("hidden", "true")?;
@@ -179,17 +141,14 @@ pub(super) fn create_settings_panel(
 
     let session_for_sensitivity = Rc::clone(session);
     let sensitivity_for_change = sensitivity.clone();
-    let on_sensitivity = Closure::<dyn FnMut(Event)>::new(move |_| {
+    listeners.listen(&sensitivity, "input", move |_| {
         if let Ok(value) = sensitivity_for_change.value().parse::<f32>() {
             let mut session = session_for_sensitivity.borrow_mut();
             session.settings.mouse_sensitivity = value.clamp(0.03, 0.8);
             sensitivity_for_change.set_value(&session.settings.mouse_sensitivity.to_string());
             save_settings(&session.settings);
         }
-    });
-    sensitivity
-        .add_event_listener_with_callback("input", on_sensitivity.as_ref().unchecked_ref())?;
-    on_sensitivity.forget();
+    })?;
 
     let invert_label = element(document, "label", "settings-check")?;
     let invert = element(document, "input", "")?.dyn_into::<HtmlInputElement>()?;
@@ -206,16 +165,14 @@ pub(super) fn create_settings_panel(
     panel.append_child(&invert_label)?;
     let session_for_invert = Rc::clone(session);
     let invert_for_change = invert.clone();
-    let on_invert = Closure::<dyn FnMut(Event)>::new(move |_| {
+    listeners.listen(&invert, "change", move |_| {
         let mut session = session_for_invert.borrow_mut();
         session.settings.invert_mouse_y = invert_for_change.checked();
         save_settings(&session.settings);
-    });
-    invert.add_event_listener_with_callback("change", on_invert.as_ref().unchecked_ref())?;
-    on_invert.forget();
+    })?;
 
     let bindings = element(document, "div", "binding-list")?;
-    for action in Action::ALL {
+    for action in VisitorAction::ALL {
         let button = element(document, "button", "binding-button")?;
         button.set_attribute("type", "button")?;
         {
@@ -223,13 +180,13 @@ pub(super) fn create_settings_panel(
             button.set_text_content(Some(&format!(
                 "{}: {}",
                 action.label(),
-                action.binding(&session.settings)
+                session.binding(action)
             )));
             session.binding_buttons.push((action, button.clone()));
         }
         let session_for_binding = Rc::clone(session);
         let button_for_binding = button.clone();
-        let on_binding = Closure::<dyn FnMut()>::new(move || {
+        listeners.listen(&button, "click", move |_| {
             let mut session = session_for_binding.borrow_mut();
             session.listening = Some(action);
             for (_, existing) in &session.binding_buttons {
@@ -237,206 +194,189 @@ pub(super) fn create_settings_panel(
             }
             let _ = button_for_binding.set_attribute("data-listening", "true");
             button_for_binding.set_text_content(Some("Press a key…"));
-        });
-        button.add_event_listener_with_callback("click", on_binding.as_ref().unchecked_ref())?;
-        on_binding.forget();
+        })?;
         bindings.append_child(&button)?;
     }
     panel.append_child(&bindings)?;
     Ok(panel)
 }
 
-pub(super) fn attach_fps_controls(
+pub(super) fn attach_controls(
     document: &Document,
     installation: &Element,
     observer: &Element,
     session: &Rc<RefCell<Session>>,
-    renderer: Rc<SceneRenderer>,
+    runtime: RuntimeHandle,
+    lifecycle: &mut ViewLifecycle,
 ) -> Result<(), JsValue> {
-    let navigation = renderer.navigation_mode();
-    installation.set_attribute(
-        "data-navigation",
-        match navigation {
-            NavigationMode::Room => "room",
-            NavigationMode::Space => "space",
-        },
-    )?;
+    installation.set_attribute("data-navigation", runtime.borrow().navigation_label())?;
 
     let session_for_lock = Rc::clone(session);
+    let runtime_for_lock = Rc::clone(&runtime);
     let document_for_lock = document.clone();
     let installation_for_lock = installation.clone();
-    let on_pointer_lock = Closure::<dyn FnMut(Event)>::new(move |_| {
-        let locked = document_for_lock.pointer_lock_element().is_some();
-        session_for_lock.borrow_mut().pointer_locked = locked;
-        if locked {
-            let _ = installation_for_lock.set_attribute("data-pointer-locked", "true");
-        } else {
-            let _ = installation_for_lock.remove_attribute("data-pointer-locked");
-            session_for_lock.borrow_mut().pressed.clear();
-        }
-    });
-    document.add_event_listener_with_callback(
-        "pointerlockchange",
-        on_pointer_lock.as_ref().unchecked_ref(),
-    )?;
-    on_pointer_lock.forget();
+    lifecycle
+        .listeners
+        .listen(document, "pointerlockchange", move |_| {
+            let locked = document_for_lock.pointer_lock_element().is_some();
+            let mut session = session_for_lock.borrow_mut();
+            session.pointer_locked = locked;
+            if locked {
+                let _ = installation_for_lock.set_attribute("data-pointer-locked", "true");
+            } else {
+                let _ = installation_for_lock.remove_attribute("data-pointer-locked");
+                release_pressed_keys(&mut session, &runtime_for_lock);
+            }
+        })?;
 
     let session_for_mouse = Rc::clone(session);
-    let on_mouse_move = Closure::<dyn FnMut(MouseEvent)>::new(move |event: MouseEvent| {
-        let mut session = session_for_mouse.borrow_mut();
-        if !session.active || !session.pointer_locked {
-            return;
-        }
-        let settings = session.settings.clone();
-        match navigation {
-            NavigationMode::Room => session.player.look(
-                event.movement_x() as f32,
-                event.movement_y() as f32,
-                &settings,
-            ),
-            NavigationMode::Space => {
-                let vertical_direction = if settings.invert_mouse_y { -1.0 } else { 1.0 };
-                session.camera.look(
-                    event.movement_x() as f64,
-                    event.movement_y() as f64 * vertical_direction,
-                    settings.mouse_sensitivity.to_radians() as f64,
-                );
+    let runtime_for_mouse = Rc::clone(&runtime);
+    lifecycle
+        .listeners
+        .listen(document, "mousemove", move |event| {
+            let Ok(event) = event.dyn_into::<MouseEvent>() else {
+                return;
+            };
+            let session = session_for_mouse.borrow();
+            if !session.active || !session.pointer_locked {
+                return;
             }
-        }
-    });
-    document
-        .add_event_listener_with_callback("mousemove", on_mouse_move.as_ref().unchecked_ref())?;
-    on_mouse_move.forget();
+            runtime_for_mouse.borrow_mut().look(
+                event.movement_x() as f64,
+                event.movement_y() as f64,
+                session.settings.mouse_sensitivity,
+                session.settings.invert_mouse_y,
+            );
+        })?;
 
     let session_for_down = Rc::clone(session);
-    let renderer_for_down = Rc::clone(&renderer);
-    let on_key_down = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-        let mut session = session_for_down.borrow_mut();
-        if !session.active {
-            return;
-        }
-        if let Some(action) = session.listening {
-            if is_supported_key_code(&event.code()) && !event.repeat() {
-                action.set_binding(&mut session.settings, event.code());
-                session.settings = session.settings.clone().sanitized();
-                session.listening = None;
-                session.update_binding_buttons();
-                save_settings(&session.settings);
-                event.prevent_default();
+    let runtime_for_down = Rc::clone(&runtime);
+    lifecycle
+        .listeners
+        .listen(document, "keydown", move |event| {
+            let Ok(event) = event.dyn_into::<KeyboardEvent>() else {
+                return;
+            };
+            let mut session = session_for_down.borrow_mut();
+            if !session.active {
+                return;
             }
-            return;
-        }
-        if event_target_is_form_control(&event) {
-            return;
-        }
-
-        let code = event.code();
-        let is_action = session.is_action_code(&code);
-        let is_space_command = navigation == NavigationMode::Space
-            && matches!(
-                code.as_str(),
-                "ShiftLeft" | "ShiftRight" | "KeyX" | "KeyF" | "KeyR" | "KeyZ" | "KeyC" | "KeyT"
-            );
-        if !is_action && !is_space_command {
-            return;
-        }
-
-        if navigation == NavigationMode::Room
-            && code == session.settings.bindings.jump
-            && !event.repeat()
-        {
-            session.player.request_jump();
-        }
-        if navigation == NavigationMode::Space && !event.repeat() {
-            match code.as_str() {
-                "KeyF" => session.camera.point_at_earth(),
-                "KeyR" => session.camera.reset_view(),
-                "KeyZ" => session.camera.adjust_camera_speed(-1),
-                "KeyC" => session.camera.adjust_camera_speed(1),
-                "KeyT" => renderer_for_down.cycle_time_scale(),
-                _ => {}
+            if let Some(action) = session.listening {
+                if is_supported_key_code(&event.code()) && !event.repeat() {
+                    session.set_binding(action, event.code());
+                    session.settings = session.settings.clone().sanitized();
+                    session.listening = None;
+                    session.pressed.clear();
+                    session.update_binding_buttons();
+                    save_settings(&session.settings);
+                    event.prevent_default();
+                }
+                return;
             }
-        }
-        session.pressed.insert(code);
-        event.prevent_default();
-    });
-    document.add_event_listener_with_callback("keydown", on_key_down.as_ref().unchecked_ref())?;
-    on_key_down.forget();
+            if event_target_is_form_control(&event) {
+                return;
+            }
+
+            let code = event.code();
+            let action = session.action_for_code(&code);
+            if let Some(action) = action {
+                runtime_for_down
+                    .borrow_mut()
+                    .action_changed(action, true, event.repeat());
+            }
+            let command =
+                runtime_for_down
+                    .borrow_mut()
+                    .command_key_changed(&code, true, event.repeat());
+            if action.is_none() && !command {
+                return;
+            }
+            session.pressed.insert(code);
+            event.prevent_default();
+        })?;
 
     let session_for_up = Rc::clone(session);
-    let on_key_up = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-        let mut session = session_for_up.borrow_mut();
-        if !session.active || event_target_is_form_control(&event) {
-            return;
-        }
-        session.pressed.remove(&event.code());
-    });
-    document.add_event_listener_with_callback("keyup", on_key_up.as_ref().unchecked_ref())?;
-    on_key_up.forget();
+    let runtime_for_up = Rc::clone(&runtime);
+    lifecycle
+        .listeners
+        .listen(document, "keyup", move |event| {
+            let Ok(event) = event.dyn_into::<KeyboardEvent>() else {
+                return;
+            };
+            let mut session = session_for_up.borrow_mut();
+            if !session.active {
+                return;
+            }
+            let code = event.code();
+            let action = session.action_for_code(&code);
+            if let Some(action) = action {
+                runtime_for_up
+                    .borrow_mut()
+                    .action_changed(action, false, false);
+            }
+            let command = runtime_for_up
+                .borrow_mut()
+                .command_key_changed(&code, false, false);
+            session.pressed.remove(&code);
+            if action.is_some() || command {
+                event.prevent_default();
+            }
+        })?;
 
     let session_for_blur = Rc::clone(session);
-    let on_blur = Closure::<dyn FnMut(Event)>::new(move |_| {
-        session_for_blur.borrow_mut().pressed.clear();
-    });
-    window()?.add_event_listener_with_callback("blur", on_blur.as_ref().unchecked_ref())?;
-    on_blur.forget();
+    let runtime_for_blur = Rc::clone(&runtime);
+    lifecycle.listeners.listen(&window()?, "blur", move |_| {
+        release_pressed_keys(&mut session_for_blur.borrow_mut(), &runtime_for_blur);
+    })?;
 
-    start_render_loop(session, renderer, observer, navigation)
+    lifecycle.set_animation(start_render_loop(session, runtime, observer)?);
+    Ok(())
+}
+
+fn release_pressed_keys(session: &mut Session, runtime: &RuntimeHandle) {
+    for code in std::mem::take(&mut session.pressed) {
+        if let Some(action) = session.action_for_code(&code) {
+            runtime.borrow_mut().action_changed(action, false, false);
+        }
+        runtime
+            .borrow_mut()
+            .command_key_changed(&code, false, false);
+    }
 }
 
 fn start_render_loop(
     session: &Rc<RefCell<Session>>,
-    renderer: Rc<SceneRenderer>,
+    runtime: RuntimeHandle,
     observer: &Element,
-    navigation: NavigationMode,
-) -> Result<(), JsValue> {
-    let animation: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
-    let animation_for_frame = Rc::clone(&animation);
+) -> Result<AnimationFrameLoop, JsValue> {
     let session_for_frame = Rc::clone(session);
-    let renderer_for_frame = Rc::clone(&renderer);
     let observer_for_frame = observer.clone();
-    let window_for_frame = window()?;
-    *animation.borrow_mut() = Some(Closure::new(move |now: f64| {
-        let mut session = session_for_frame.borrow_mut();
-        if !session.active {
-            return;
-        }
-        let delta = session
-            .last_frame_ms
-            .replace(now)
-            .map(|last_frame| (now - last_frame) / 1000.0)
-            .unwrap_or(0.0);
+    AnimationFrameLoop::start(move |now| {
+        let (delta, actions) = {
+            let mut session = session_for_frame.borrow_mut();
+            if !session.active {
+                return false;
+            }
+            let delta = session
+                .last_frame_ms
+                .replace(now)
+                .map(|last_frame| (now - last_frame) / 1_000.0)
+                .unwrap_or(0.0);
+            (delta, session.action_state())
+        };
 
-        match navigation {
-            NavigationMode::Room => {
-                let input = session.room_input();
-                session.player.tick(delta as f32, input);
-            }
-            NavigationMode::Space => {
-                let input = session.camera_input();
-                session.camera.tick(delta, input);
-            }
-        }
-        renderer_for_frame.render(session.player, session.camera, now);
+        let mut runtime = runtime.borrow_mut();
+        runtime.frame(now, delta, actions);
         let _ = observer_for_frame.set_attribute(
             "data-crouching",
-            if navigation == NavigationMode::Room && session.player.crouching {
+            if runtime.is_crouching() {
                 "true"
             } else {
                 "false"
             },
         );
-        drop(session);
-        if let Some(callback) = animation_for_frame.borrow().as_ref() {
-            let _ = window_for_frame.request_animation_frame(callback.as_ref().unchecked_ref());
-        }
-    }));
-    let animation_borrow = animation.borrow();
-    let callback = animation_borrow
-        .as_ref()
-        .ok_or_else(|| JsValue::from_str("Animation callback is unavailable."))?;
-    window()?.request_animation_frame(callback.as_ref().unchecked_ref())?;
-    Ok(())
+        true
+    })
 }
 
 fn event_target_is_form_control(event: &KeyboardEvent) -> bool {

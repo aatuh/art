@@ -4,12 +4,14 @@
 pub(crate) struct Mat4(pub [f32; 16]);
 
 impl Mat4 {
+    #[cfg(test)]
     pub(crate) fn identity() -> Self {
         Self([
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ])
     }
 
+    #[cfg(test)]
     pub(crate) fn translation_scale(position: [f32; 3], scale: f32) -> Self {
         Self([
             scale,

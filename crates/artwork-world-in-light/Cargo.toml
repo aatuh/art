@@ -1,0 +1,11 @@
+[package]
+name = "artwork-world-in-light"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pure domain model for the A World in Light gallery artwork."
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+gallery-core = { path = "../gallery-core" }

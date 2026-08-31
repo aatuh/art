@@ -4,13 +4,26 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A static WebAssembly digital art gallery."
+repository = "https://github.com/aatuh/art"
 license = "UNLICENSED"
 publish = false
+
+[workspace]
+members = [
+  ".",
+  "crates/gallery-core",
+  "crates/artwork-black-cube",
+  "crates/artwork-world-in-light",
+]
+resolver = "2"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+artwork-black-cube = { path = "crates/artwork-black-cube" }
+artwork-world-in-light = { path = "crates/artwork-world-in-light" }
+gallery-core = { path = "crates/gallery-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 

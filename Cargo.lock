@@ -3,9 +3,26 @@
 version = 4
 
 [[package]]
+name = "artwork-black-cube"
+version = "0.1.0"
+dependencies = [
+ "gallery-core",
+]
+
+[[package]]
+name = "artwork-world-in-light"
+version = "0.1.0"
+dependencies = [
+ "gallery-core",
+]
+
+[[package]]
 name = "black-cube-gallery"
 version = "0.1.0"
 dependencies = [
+ "artwork-black-cube",
+ "artwork-world-in-light",
+ "gallery-core",
  "js-sys",
  "serde",
  "serde_json",
@@ -24,6 +41,10 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+
+[[package]]
+name = "gallery-core"
+version = "0.1.0"
 
 [[package]]
 name = "itoa"

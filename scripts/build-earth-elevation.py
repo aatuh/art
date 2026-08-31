@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build a compact browser elevation texture from NOAA ETOPO 2022.
+"""Build a compact research elevation texture from NOAA ETOPO 2022.
 
 The input is the official global Ice Surface GeoTIFF. The output is an 8-bit
-PNG encoded as base64 text for inclusion in the static Wasm bundle. Elevation
-is mapped linearly from -11,000 m to +9,000 m; the shader reverses that mapping.
+PNG encoded as base64 text. Elevation is mapped linearly from -11,000 m to
++9,000 m. The current browser renderer does not consume this artifact; use the
+cube-sphere elevation builder for the planned ground-scale terrain pipeline.
 
 Requires GDAL's `gdal_translate` command. Runtime/static hosting has no GDAL
 or Python dependency because this script is only an offline asset builder.
@@ -30,8 +31,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("src/browser/earth_elevation_512.png.b64"),
-        help="base64 PNG output path",
+        default=Path("target/earth-authoring/earth-elevation-512.png.b64"),
+        help="research base64 PNG output path",
     )
     parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)

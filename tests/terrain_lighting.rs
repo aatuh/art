@@ -1,4 +1,4 @@
-use black_cube_gallery::terrain_lighting::{
+use artwork_world_in_light::terrain_lighting::{
     TERRAIN_SHADOW_MAX_CAMERA_ALTITUDE_M, terrain_clearance_visibility, terrain_shadow_enabled,
     terrain_shadow_visibility,
 };

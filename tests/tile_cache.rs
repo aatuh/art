@@ -1,4 +1,4 @@
-use black_cube_gallery::{
+use artwork_world_in_light::{
     planet_tiles::{CubeFace, TileAssetRequest, TileId, TileLayer},
     tile_cache::{ResidentTileCache, SlotReservation},
 };

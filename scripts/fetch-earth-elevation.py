@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Fetch a compact measured Earth elevation texture from NOAA ETOPO 2022.
+"""Fetch a compact research Earth elevation texture from NOAA ETOPO 2022.
 
-The runtime renderer expects an equirectangular grayscale texture with longitude
-ordered west-to-east from -180 to +180 degrees and latitude north-to-south. NOAA's
-ERDDAP copy of ETOPO 2022 exposes longitude in the 0..360 convention, so this
-builder explicitly reorders it before resampling.
+The generated research artifact is an equirectangular grayscale texture with
+longitude ordered west-to-east from -180 to +180 degrees and latitude
+north-to-south. NOAA's ERDDAP copy of ETOPO 2022 exposes longitude in the 0..360
+convention, so this builder explicitly reorders it before resampling.
+
+The current browser renderer does not consume this compact base64 artifact. It
+is retained as a measured-data authoring reference; the cube-sphere elevation
+builder is the planned path for ground-scale terrain.
 
 Source dataset:
   NOAA NCEI ETOPO 2022, 60 Arc-Second, Global (Ice Surface)
@@ -47,8 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("src/browser/earth_elevation_512.png.b64"),
-        help="base64 PNG output path",
+        default=Path("target/earth-authoring/earth-elevation-512.png.b64"),
+        help="research base64 PNG output path",
     )
     parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
